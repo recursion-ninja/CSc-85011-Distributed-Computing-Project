@@ -1,0 +1,76 @@
+\documentclass{ReportCUNY}
+\usepackage{xspace}
+
+\AssetPath{data/}
+\CourseName{Distributed and Cloud Computing}
+\CourseNumber{85011}
+\CitationFile{./data/references.bib}
+\DateD{31}
+\DateM{10}
+\DateY{2022}
+\DepartmentAbbrev{CSc}
+\DepartmentName{Computer Science}
+\Institution{The Graduate Center~--~CUNY}
+\Instructor{Saptarshi Debroy}
+\Student{Isaisa Jafarov, Nan Jia, Alex Washburn, Rose Wong}
+\Subtitle{Course Project Plan}
+\Title{Project Name Goes Here}
+
+\newcommand{\CI}{\ensuremath{\mathcal{CI}}\xspace}
+\newcommand{\Nat}{\ensuremath{\mathbb{N}}\xspace}
+\newcommand{\PA}{\ensuremath{\mathbf{PA}}\xspace}
+\newcommand{\Prf}{\ensuremath{\textsc{Prf}}\xspace}
+\newcommand{\Sel}[1]{\ensuremath{\mathbf{s}\left(\,#1\,\right)}\xspace}
+\newcommand{\Syn}{\ensuremath{\textsc{Syn}}\xspace}
+\newcommand{\ts}{\textsuperscript}
+
+\newtheorem{manualtheoreminner}{Theorem}
+\newenvironment{manualtheorem}[1]{%
+\renewcommand\themanualtheoreminner{#1}%
+\manualtheoreminner
+\normalfont
+}{\endmanualtheoreminner}
+
+
+\begin{document}
+\setlength{\belowdisplayskip}{0pt} \setlength{\belowdisplayshortskip}{1pt}
+\setlength{\abovedisplayskip}{0pt} \setlength{\abovedisplayshortskip}{1pt}
+\setlength{\abovedisplayskip}{5pt}
+\setlength{\belowdisplayskip}{5pt}
+
+\section{Introduction}
+
+\section{Requirements}
+
+\begin{itemize}
+\item Create a multi-cloud topology in GENI
+\begin{itemize}
+	\item Multiple resource domains
+	\item Different network and compute capacities
+	\item Gateway users
+	\item Submitting jobs with different performance requirements
+	\item You can design dummy workloads or real AI/ML jobs
+	\item Internal and external users
+\end{itemize}
+
+\item Implement a centralized brokering service for the Science Gateway
+\begin{itemize}
+	\item Dynamic load balancer
+	\item Replica management
+	\item SDN for traffic engineering
+	\item You can design from scratch or use container and/or K8s services
+\end{itemize}
+
+\end{itemize}
+
+
+\section{Design}
+
+
+\section{Work Delegation}
+
+
+\section{Estimated Timeline}
+
+
+\end{document}
