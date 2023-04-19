@@ -21,6 +21,7 @@
 \newcommand{\KeyWord}[1]{\textbf{\texttt{#1}}}
 \newcommand{\KeyValuePair}[2]{\KeyWord{#1}\;:\qquad#2}
 \newcommand{\KeyTypeValuePair}[3]{\KeyWord{#1}:~\makebox[2cm][l]{#2}~\qquad#3}
+\newcommand{\WorkloadStudentTaksPair}[2]{\makebox[2.75cm][l]{#1:}~#2}
 
 \begin{document}
 \setlength{\belowdisplayskip}{0pt} \setlength{\belowdisplayshortskip}{1pt}
@@ -75,8 +76,8 @@ A \KeyWord{Job} contains the following information:
 \item \KeyTypeValuePair{RAM~}{$\text{MiB } \in \PosInt$}{Memory requirements in MiB}
 \item \KeyTypeValuePair{CPUs}{$\PosInt$}{number of CPU cores/threads}
 \item \KeyTypeValuePair{GPUs}{$\Nat$}{GPU requirements}
-\item \KeyTypeValuePair{Task}{Blob}{File of the executable to run}
-\item \KeyTypeValuePair{Data}{Array Blob}{A list of data blobs to load into the disk space, total must be $\le \KeyWord{Disk}$}
+\item \KeyTypeValuePair{Task}{Binary}{File of the executable to run}
+\item \KeyTypeValuePair{Data}{Array Binary}{A list of data blobs to load into the disk space, total must be $\le \KeyWord{Disk}$}
 \end{itemize}
 
 The \KeyWord{Broker} can process a \KeyWord{Job}, and decide which resources to allocate to fulfill the job request across the \KeyWord{Domain}s.
@@ -98,10 +99,10 @@ Subsequently, the \KeyWord{Job} information is encoded as JSON by the endpoint a
 Who did what? Who did a lot of what?
 
 \begin{itemize}
-\item Isa Jafarov: \ldots
-\item Nan Jia: \ldots
-\item Alex Washburn: TUI endpoints
-\item Rose Wong: \ldots
+\item \WorkloadStudentTaksPair{Isa Jafarov}{Backend Broker; centralized job/resource database, job queuing}
+\item \WorkloadStudentTaksPair{Nan Jia}{Docker and Kubernetes startup scripts/containerization}
+\item \WorkloadStudentTaksPair{Alex Washburn}{TUI endpoints, scheduling algorithm}
+\item \WorkloadStudentTaksPair{Rose Wong}{Backend Backup/Replication}
 \end{itemize}
 
 
