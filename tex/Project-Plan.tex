@@ -1,4 +1,5 @@
 \documentclass{ReportCUNY}
+\usepackage{array}
 \usepackage{xspace}
 
 \AssetPath{data/}
@@ -23,6 +24,8 @@
 \newcommand{\KeyTypeValuePair}[3]{\KeyWord{#1}:~\makebox[2cm][l]{#2}~\qquad#3}
 \newcommand{\WorkloadStudentTaksPair}[2]{\makebox[2.75cm][l]{#1:}~#2}
 
+\newcommand{\MonthDayFormat}[2]{\textbf{\texttt{#1}}~--~\textbf{\texttt{#2}}}
+
 \begin{document}
 \setlength{\belowdisplayskip}{0pt} \setlength{\belowdisplayshortskip}{1pt}
 \setlength{\abovedisplayskip}{0pt} \setlength{\abovedisplayshortskip}{1pt}
@@ -31,53 +34,41 @@
 
 \section{Introduction}
 
-\begin{center}\textbf{\texttt{T~O~D~O}}\end{center}
+The course project comprises the creation of a distributed ``Science Broker'' which manages requests for scientific resources and information.
+We will fulfill the project requirements by designing and implementation a service which receives requests for resources to satisfy a scientific job submission.
+Furthermore, the service will be implemented in a distributed manner, permitting the sharing of resources across collaborating scientific ``domains.''
 
-
-\section{Requirements}
-
-\begin{center}\textbf{\texttt{T~O~D~O}}\end{center}
-(Elaborate, don't just copy the text from the slides)
-
-\begin{itemize}
-	\item Create a multi-cloud topology in GENI
-	\begin{itemize}
-		\item Multiple resource domains
-		\item Different network and compute capacities
-		\item Gateway users
-		\item Submitting jobs with different performance requirements
-		\item You can design dummy workloads or real AI/ML jobs
-		\item Internal and external users
-	\end{itemize}
-	
-	\item Implement a centralized brokering service for the Science Gateway
-	\begin{itemize}
-		\item Dynamic load balancer
-		\item Replica management
-		\item SDN for traffic engineering
-		\item You can design from scratch or use container and/or K8s services
-	\end{itemize}
-	
-\end{itemize}
 
 \section{Design}
 
-\begin{center}\textbf{\texttt{T~O~D~O}}\end{center}
-(Elaborate, don't just copy the text from the slides)
+\subsection{Overview: Utilize GENI multi-cloud topology}
 
+We will use GENI to simulate multiple collaborating scientific institutions.
+Each scientific organization will form a \KeyWord{Domain}.
+A \KeyWord{Domain} is a network topology of resources contained entirely within a ``real'' GENI site.
+Multiple \KeyWord{Domain} will be connected together within GENI to form a multi-could topology.
+Every \ \KeyWord{Domain} has an \KeyWord{Endpoint} facilitating \KeyWord{User} access to the entire multi-could topology which comprises the Science Broker Service.
+A \KeyWord{User} can submit a \KeyWord{Job} through an \KeyWord{Endpoint} by specifying the required resources.
+
+Furthermore there will be an additional \KeyWord{Domain} containing containing the \KeyWord{Broker}.
+All resources across all \KeyWord{Domain}s are known to the \KeyWord{Broker}.
+Hence, the \KeyWord{Broker} handles scheduling, networking, and load balancing of submitted \KeyWord{Job}s.
+
+
+\subsection{Broker}
+
+\begin{center}\textbf{\texttt{T~O~D~O}}\end{center}
+
+The \KeyWord{Broker} agent/instance is the centralized manager of the Science Broker Service.
+Encapsulated within the \KeyWord{Broker} is the maintenance of an ACID database containing:
 \begin{itemize}
-	\item What are you trying to do? Articulate your objectives using absolutely no jargon.
-	\item How is it done today, and what are the limits of current practice?
-	\item What's new in your approach and why do you think it will be successful?
-	\item Who cares? Think from both user side and service provider sides...
-	\item If you're successful, what difference will it make?
-	\item What major concepts related to the course were used and reinforced in the project?
+\item A list of all incomplete \KeyWord{Job} submissions.
+\item A list of all resources across each \KeyWord{Domain}.
+\item A mapping of which resource(s) are allocated to which \KeyWord{Job}.
+\item A queue of pending \KeyWord{Job} submissions.
 \end{itemize}
 
-
-\subsection{Science Broker}
-
-\begin{center}\textbf{\texttt{T~O~D~O}}\end{center}
+Additionally, the \KeyWord{Broker} executes a scheduling algorithm to determine which queued \KeyWord{Job} will be given which resource(s) and when a \KeyWord{Job} will be migrated.
 
 
 \subsection{Scheduling \& Queuing}
@@ -115,13 +106,13 @@ The \KeyWord{Broker} can process a \KeyWord{Job}, and decide which resources to 
 
 \subsection{User Interface}
 
-The \KeyWord{User} submits a \KeyWord{Job} at an endpoint.
-The endpoint presents a User Interface (UI) to the \KeyWord{User}.
+The \KeyWord{User} submits a \KeyWord{Job} at an \KeyWord{Endpoint}.
+The \KeyWord{Endpoint} presents a User Interface (UI) to the \KeyWord{User}.
 The presented UI could be a hosted website, a terminal user interface (TUI), or a standalone graphical user interface (GUI).
 We will focus on a TUI for the initial implementation, with an HTML website UI as a stretch goal.
 
-Required information of a \KeyWord{Job} is collected from the \KeyWord{User} by the endpoint UI.
-Subsequently, the \KeyWord{Job} information is encoded as JSON by the endpoint and forwarded to the \KeyWord{Broker}.
+Required information of a \KeyWord{Job} is collected from the \KeyWord{User} by the \KeyWord{Endpoint} UI.
+Subsequently, the \KeyWord{Job} information is encoded as JSON by the \KeyWord{Endpoint} and forwarded to the \KeyWord{Broker}.
 
 
 \section{Work Delegation}
@@ -140,14 +131,25 @@ Who will do what?
 \begin{itemize}
 \item \WorkloadStudentTaksPair{Isa Jafarov}{Backend Broker; centralized job/resource database, job queuing}
 \item \WorkloadStudentTaksPair{Nan Jia}{Docker and Kubernetes startup scripts/containerization}
-\item \WorkloadStudentTaksPair{Alex Washburn}{TUI endpoints, scheduling algorithm}
+\item \WorkloadStudentTaksPair{Alex Washburn}{TUI \KeyWord{Endpoint}s, scheduling algorithm}
 \item \WorkloadStudentTaksPair{Rose Wong}{Backend Backup/Replication}
 \end{itemize}
 
 
 \section{Estimated Timeline}
 
-\begin{center}\textbf{\texttt{T~O~D~O}}\end{center}
-
+\begin{center}
+\begin{tabular}{ |c| m{9.5cm}| l | c |} 
+\hline
+Week & Planned Work Items& Deliverable & Date\\
+\hline
+\MonthDayFormat{04}{16} & System design, GENI research & Project Plan & \MonthDayFormat{04}{23}\\ 
+\MonthDayFormat{04}{23} & Frontend TUI, GENI experimentation, containerization & \makebox[6mm][l]{1st} Presentation & \MonthDayFormat{05}{01}\\
+\MonthDayFormat{04}{30} & Replication, backups, scheduling algorithm & \makebox[2.85cm]{\hfill---~---\hfill} &  ---~--- \\
+\MonthDayFormat{05}{07} & Backend UI, job status feeback, resource utilization  & \makebox[6mm][l]{2nd} Presentation &  \MonthDayFormat{05}{15} \\
+\MonthDayFormat{05}{15} & Finalize everything! & Project Report &  \MonthDayFormat{05}{22} \\
+\hline
+\end{tabular}
+\end{center}
 
 \end{document}
