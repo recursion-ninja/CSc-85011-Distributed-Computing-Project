@@ -1,0 +1,137 @@
+Cabal-Version: 3.4
+Name:          science-broker
+Version:       2.2.12
+Stability:     Stable
+Build-Type:    Simple
+               
+Author:        Alex Washburn <github@recursion.ninja>
+Copyright:     (c) 2015-2022 Alex Washburn
+License:       CC-BY-SA-4.0
+License-File:  doc/LICENSE
+
+Maintainer:    Alex Washburn <github@recursion.ninja>
+Homepage:      https://github.com/recursion-ninja/CSc-85011-Distributed-Computing-Project
+Bug-Reports:   https://github.com/recursion-ninja/CSc-85011-Distributed-Computing-Project/issues
+
+Synopsis:      The TUI for the CUNY CSc 85011 Distributed and Cloud Computing Project
+Description:   The builds the frontend TUI along with other components
+ 
+Source-Repository head
+  type: git
+  location: https://github.com/recursion-ninja/CSc-85011-Distributed-Computing-Project
+
+Category:
+    CLI
+    TUI
+    Web
+
+Tested-With:
+    GHC == 9.6.1
+
+Extra-Doc-Files:
+    ../doc/CHANGELOG.md
+    ../doc/README.md
+
+
+-- A litany of GHC warnings designed to alert us during the build of any common
+-- pitfalls, future compatibility issues, or coding conventions.
+common build-config
+
+  default-language:
+    GHC2021
+
+  ghc-options:
+    -- Concurrency
+    -rtsopts
+    -threaded
+    -with-rtsopts=-N
+
+    -- Optimization flags
+    -O2
+    -fexcess-precision
+    -fexpose-all-unfoldings
+    -flate-specialise
+    -fmax-simplifier-iterations=16
+    -foptimal-applicative-do
+    -fspec-constr-count=8
+    -fspec-constr-keen
+    -fspecialize-aggressively
+    -fstatic-argument-transformation
+
+    -- Usability flags
+    -fdiagnostics-color=always
+    -fhide-source-paths
+    -j
+    -- Sanity check warnings:
+    --   1. Fail on a warning
+    --   2. Include all warnings by default
+    --   3. Exclude the undesirable warnings
+--    -Werror
+    -Weverything
+    -- Exclusions:
+    -Wno-all-missed-specialisations
+    -Wno-implicit-prelude
+    -Wno-missing-import-lists
+    -Wno-missing-kind-signatures
+    -Wno-missing-safe-haskell-mode
+    -Wno-monomorphism-restriction
+    -Wno-type-defaults
+    -Wno-unsafe
+
+    -Wno-unused-top-binds
+        
+Executable science-broker-terminal
+
+  import:
+    build-config
+
+  build-depends:
+    science-broker:terminal-layout,
+    base >=4.7 && <5,
+    brick,
+    containers,
+    unix,
+    vty
+                     
+  ghc-options:
+    -rtsopts
+    -threaded
+    -with-rtsopts=-N
+
+  hs-source-dirs:
+    app
+
+  main-is:
+    FrontEnd.hs
+
+
+Library terminal-layout
+
+  import:
+    build-config
+
+  build-depends:
+    aeson,
+    base >=4.7 && <5,
+    bytestring,
+    microlens
+
+  exposed-modules:
+    Broker.Job.Class
+    Broker.Job.Input
+    Broker.Job.Specification
+    Data.Validation
+
+  hs-source-dirs:
+    lib
+
+  other-extensions:
+    TemplateHaskell
+
+  other-modules:
+    Broker.Job.Input.Internal
+    Broker.Job.Generic
+    Broker.Job.Specification.Internal
+
+  visibility:
+    private
