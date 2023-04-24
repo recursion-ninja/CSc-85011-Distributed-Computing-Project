@@ -14,8 +14,8 @@
 \Institution{The Graduate Center~--~CUNY}
 \Instructor{Saptarshi Debroy}
 \Student{Isa Jafarov, Nan Jia, Alex Washburn, Rose Wong}
-\Subtitle{Course Project Plan}
-\Title{Project Name Goes Here}
+\Subtitle{STREAM: Course Project Plan}
+\Title{Simple \& Transparent Resource\\\vspace*{-8mm}Exchange And Management}
 
 \newcommand{\Nat}{\ensuremath{\mathbb{N}}\xspace}
 \newcommand{\PosInt}{\ensuremath{\mathbb{Z}^{+}}\xspace}
@@ -57,8 +57,6 @@ Hence, the \KeyWord{Broker} handles scheduling, networking, and load balancing o
 
 \subsection{Broker}
 
-\begin{center}\textbf{\texttt{T~O~D~O}}\end{center}
-
 The \KeyWord{Broker} agent/instance is the centralized manager of the Science Broker Service.
 Encapsulated within the \KeyWord{Broker} is the maintenance of an ACID database containing:
 \begin{itemize}
@@ -73,16 +71,22 @@ Additionally, the \KeyWord{Broker} executes a scheduling algorithm to determine 
 
 \subsection{Scheduling \& Queuing}
 
-\begin{center}\textbf{\texttt{T~O~D~O}}\end{center}
 Testing possible scheduling algorithms that are:
+\begin{itemize}
 \item FCFS(first come first serve)
 \item SJF(shortest job first)
 \item RR(round robing)
+\end{itemize}
 
 Because we focus on monitoring our brokering network's resource management and performance. Those three algorithms have different advantages and disadvantages. 
 \subsection{Domains}
 
 \begin{center}\textbf{\texttt{T~O~D~O}}\end{center}
+
+Within the multi-could topology, there are many \KeyWord{Domain}s.
+Each \KeyWord{Domain} contributes one or more computing resources to the multi-could topology.
+Additionally, each \KeyWord{Domain} locally hosts an \KeyWord{Endpoint} from which a \KeyWord{User} within the \KeyWord{Domain} can access the computing resources of the science brokering service by submitting a \KeyWord{Job}.
+Networked communication and computations across domains are dynamically mediated by the \KeyWord{Broker}.
 
 
 \subsection{Replication}
@@ -121,7 +125,7 @@ Subsequently, the \KeyWord{Job} information is encoded as JSON by the \KeyWord{E
 
 \section{Work Delegation}
 
-Main task ``umbrellas'' to be completed:
+\subsection{Main task ``umbrellas'' to be completed:}
 
 \begin{itemize}
 \item Backend
@@ -130,7 +134,7 @@ Main task ``umbrellas'' to be completed:
 \item Replication
 \end{itemize}
 
-Who will do what?
+\subsection{Who will do what?}
 
 \begin{itemize}
 \item \WorkloadStudentTaksPair{Isa Jafarov}{Backend Broker; centralized job/resource database, job queuing}
