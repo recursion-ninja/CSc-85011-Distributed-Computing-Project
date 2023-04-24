@@ -32,6 +32,7 @@ import Broker.Job.Generic
 import Broker.Job.Specification.Internal
 import Data.Functor.Identity
 import Data.List.NonEmpty(NonEmpty(..))
+import Data.Text qualified as T
 import Data.Validation
 import Lens.Micro (Getting, (^.))
 
@@ -53,27 +54,36 @@ deriving newtype instance Show JobError
 
 fromValidUserInput :: UserInputJob -> Validation JobError JobSpecification
 fromValidUserInput (UserInputJob spec) =
-    let meta :: JobMetadataT Maybe
+    let meta :: JobMetadataT UserInput
         meta = getJobMetadata spec
 
-        bins :: JobBinaryStreamsT Maybe
+        bins :: JobBinaryStreamsT UserInput
         bins = getJobStreams spec
 
-        check :: (String, Getting (Maybe a) s (Maybe a)) -> s -> Validation JobError (Identity a)
-        check (key, getter) obj = case obj ^. getter of
+        check :: (String, Getting (UserInput a) s (UserInput a)) -> s -> Validation JobError (Identity a)
+        check (key, getter) obj = case getUserInput $ obj ^. getter of
             Nothing -> Failure . JobError $ pure key
             Just v  -> Success $ Identity v
 
-        checkMeta :: JobMetadataT Maybe -> Validation JobError (JobMetadataT Identity)
+        email :: (String, Getting T.Text p T.Text) -> p -> Validation JobError T.Text
+        email (key, getter) obj =
+            let txt = obj ^. getter
+            in  if T.null txt
+                then Failure . JobError $ pure key
+                else Success txt                                                                                                   
+
+
+
+        checkMeta :: JobMetadataT UserInput -> Validation JobError (JobMetadataT Identity)
         checkMeta obj = JobMetadataT
-            <$> check ( "Mail", jobMail ) obj
+            <$> email ( "Mail", jobMail ) obj
             <*> check ( "Time", jobTime ) obj
             <*> check ( "Disk", jobDisk ) obj
             <*> check ( "RAM" , jobRAM  ) obj
             <*> check ( "CPUs", jobCPUs ) obj
             <*> check ( "GPUs", jobGPUs ) obj
 
-        checkBins :: JobBinaryStreamsT Maybe -> Validation JobError (JobBinaryStreamsT Identity)
+        checkBins :: JobBinaryStreamsT UserInput -> Validation JobError (JobBinaryStreamsT Identity)
         checkBins obj = JobBinaryStreamsT
             <$> check ( "Task", jobTask ) obj
             <*> check ( "Data", jobData ) obj

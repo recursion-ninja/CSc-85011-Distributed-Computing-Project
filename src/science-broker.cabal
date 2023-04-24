@@ -90,6 +90,7 @@ Executable science-broker-terminal
     base >=4.7 && <5,
     brick,
     containers,
+    microlens,
     unix,
     vty
                      
@@ -114,8 +115,9 @@ Library terminal-layout
     aeson,
     base >=4.7 && <5,
     bytestring,
-    microlens
-
+    microlens,
+    text
+    
   exposed-modules:
     Broker.Job.Class
     Broker.Job.Input

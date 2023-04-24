@@ -10,6 +10,7 @@
 module Broker.Job.Input
   ( -- * Data-types
     UserInputJob()
+  , UserInput(..)
     -- ** Constructor
   , userInputEmptyJob
     -- * Lenses
@@ -25,24 +26,24 @@ module Broker.Job.Input
 
 
 import Broker.Job.Class
-import Broker.Job.Input.Internal(UserInputJob(..))
+import Broker.Job.Input.Internal(UserInputJob(..), UserInput(..), emptyUserInput)
 import Broker.Job.Generic(JobBinaryStreamsT(..), JobMetadataT(..), JobSpecificationT(JobSpecificationT))
 
 
 userInputEmptyJob :: UserInputJob
 userInputEmptyJob =
     let emptyStreams = JobBinaryStreamsT
-            { jobStreamTask = Nothing
-            , jobStreamData = Nothing
+            { jobStreamTask = emptyUserInput
+            , jobStreamData = emptyUserInput
             }
 
         emptyMetadata = JobMetadataT
-            { jobMetaMail = Nothing
-            , jobMetaTime = Nothing
-            , jobMetaDisk = Nothing
-            , jobMetaRAM  = Nothing
-            , jobMetaCPUs = Nothing
-            , jobMetaGPUs = Nothing
+            { jobMetaMail = ""
+            , jobMetaTime = emptyUserInput
+            , jobMetaDisk = emptyUserInput
+            , jobMetaRAM  = emptyUserInput
+            , jobMetaCPUs = emptyUserInput
+            , jobMetaGPUs = emptyUserInput
             }
 
     in  UserInputJob $ JobSpecificationT emptyMetadata emptyStreams

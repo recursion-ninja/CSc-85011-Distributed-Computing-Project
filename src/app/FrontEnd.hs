@@ -9,8 +9,8 @@ module Main
   ( main
   ) where
 
---import Data.Char (intToDigit)
 import Data.Bits (Bits(..), FiniteBits(..))
+import Data.Char (isDigit)
 import Data.Foldable (traverse_)
 import Data.Functor
 import Data.List.NonEmpty (NonEmpty(..))
@@ -24,9 +24,14 @@ import Text.Printf
 
 import Brick hiding (Direction)
 import Brick.BChan (newBChan, writeBChan)
+import Brick.Forms
 import Brick.Widgets.Border qualified as B
 import Brick.Widgets.Border.Style qualified as BS
 import Brick.Widgets.Center qualified as C
+
+import Broker.Job.Input
+import Broker.Job.Specification
+
 import Control.Concurrent (forkIO, killThread, myThreadId, threadDelay)
 --import Control.Concurrent.STM.TVar (readTVar)
 --import Control.Monad.STM (atomically)
@@ -39,6 +44,7 @@ import Graphics.Vty qualified as V
 --import Lens.Micro ((^.))
 
 import Data.IORef
+import Lens.Micro (Lens', lens)
 import System.IO
 import System.IO.Unsafe
 
@@ -55,40 +61,182 @@ data Tick = Tick
 --
 -- Not currently used, but will be easier to refactor
 -- if we call this "Name" now.
-type Name = ()
+--type Name = ()
+data  Name
+    = InputField_Mail
+    | InputField_Time
+    | InputField_Disk
+    | InputField_RAM
+    | InputField_CPUs
+    | InputField_GPUs
+     deriving (Eq, Ord, Show)
 
 
-data InputState
+data  FocusedField
 
-handleEvent :: (FiniteBits b, Integral b) => BrickEvent Name Tick -> EventM Name (SketchState b) ()
+
+data  FrontEndTermState
+    = FrontEndTermState
+    { inputJob   :: UserInputJob
+--    , inputFocus :: FocusedField
+    }
+
+
+data  BinarySI
+    = Kibi
+    | Mibi
+    | Gibi
+    | Tibi
+    | Pibi
+    | Eibi
+    | Zibi
+    | Yibi
+
+
+data  DecimalSI
+    = Kilo
+    | Mega
+    | Giga
+    | Tera
+    | Peta
+    | Exa
+    | Zetta
+    | Yotta
+
+
+main :: IO ()
+main = do
+    chan <- newBChan 10
+    void . forkIO . forever $ do
+        writeBChan chan Tick
+        threadDelay 100000000
+    let builder = V.mkVty V.defaultConfig
+    initialVty <- builder
+--    void $ customMain initialVty builder (Just chan) app' initState
+    void $ customMain initialVty builder Nothing frontendApp initState
+
+
+initState :: FrontEndTermState
+initState = FrontEndTermState userInputEmptyJob
+
+
+frontendApp :: App FrontEndTermState Tick Name
+frontendApp = App
+    { appAttrMap      = const theMap
+    , appChooseCursor = showFirstCursor
+    , appDraw         = drawTUI
+    , appHandleEvent  = handleEvent
+    , appStartEvent   = return ()
+    }
+
+
+jobSpecificationForm :: UserInputJob -> Form UserInputJob e Name
+jobSpecificationForm =
+    let -- editNumericField :: (Ord n, Show n, Read a, Show a) => Lens' s a -> n -> s -> FormFieldState s e n
+        -- editNumericField x n = editShowableFieldWithValidate x n (const True)
+
+        byGetting f g n x = f (g x) n 
+        
+    in  newForm
+            [ editTextField jobMail InputField_Mail (Just 1)
+            , editShowableField (jobTime :: Lens' UserInputJob (UserInput Word64)) InputField_Time
+            , editShowableField (jobDisk :: Lens' UserInputJob (UserInput Word64)) InputField_Disk
+            , editShowableField (jobRAM  :: Lens' UserInputJob (UserInput Word64)) InputField_RAM
+            , editShowableField (jobCPUs :: Lens' UserInputJob (UserInput Word64)) InputField_CPUs
+            , editShowableField (jobGPUs :: Lens' UserInputJob (UserInput Word64)) InputField_GPUs
+--            , editNumericField jobTime InputField_Time
+--            , editNumericField jobDisk InputField_Disk
+--            , editNumericField jobRAM  InputField_RAM
+--            , editNumericField jobCPUs InputField_CPUs
+--            , editNumericField jobGPUs InputField_GPUs
+            ]
+
+
+drawTUI :: FrontEndTermState -> [Widget Name]
+drawTUI st =
+    let drawnTitle = C.center drawPreamble
+    in  [ drawnTitle, renderForm . jobSpecificationForm $ inputJob st ]
+
+
+drawPreamble :: Widget Name
+drawPreamble =
+    let drawTitle = withBorderStyle BS.unicodeBold
+--          . B.borderWithLabel (str "Shifts")
+          . C.hCenter
+          . padAll 1
+          . str 
+    in  hLimit 24 . padTop (Pad 2) $ drawTitle "Front End Terminal"
+
+
+{-
+drawState :: PrintfArg b => SketchState b -> Widget Name
+drawState st =
+    let drawIndex :: PrintfArg b => b -> Widget Name
+        drawIndex = withBorderStyle BS.unicodeBold
+          . B.borderWithLabel (str "Stored")
+          . C.hCenter
+          . padAll 1
+          . str . printf shapeIndexformatStr
+
+        drawShift :: PrintfArg b => b -> Widget Name
+        drawShift = withBorderStyle BS.unicodeBold
+          . B.borderWithLabel (str "Shifts")
+          . C.hCenter
+          . padAll 1
+          . str . printf shapeIndexformatStr
+
+    in  hLimit 24 $ vBox
+         [ drawIndex $ sketchIndex st
+         , padTop (Pad 2) $ drawShift $ sketchShift st
+         ]
+
+
+drawGrid :: FiniteBits b => SketchState b -> Widget Name
+drawGrid st =
+    let focus = fromEnum $ hoveringAt st
+
+        renderQueriedBit False = "0"
+        renderQueriedBit True  = "1"
+        
+        renderFiniteBitCells :: FiniteBits b => b -> [Widget n]
+        renderFiniteBitCells b = drawCell b <$> [ 0 .. finiteBitSize b - 1 ]
+
+--        cellWidget :: FiniteBits b => b -> String
+--        cellWidget i = 
+
+        drawCell :: Bits p => p -> Int -> Widget n
+        drawCell b i =
+            let c :: Widget n
+                c = str . renderQueriedBit $ testBit b i
+
+                f :: AttrName -> Widget n
+                f = flip withAttr c
+            in  if   i == focus
+                then f focusAttr
+                else f emptyAttr
+
+    in  withBorderStyle BS.unicodeBold
+-}
+
+handleEvent :: BrickEvent Name Tick -> EventM Name FrontEndTermState ()
 --handleEvent (AppEvent Tick)                      = pure () --continue $ step g
 --handleEvent g (VtyEvent (V.EvKey V.KUp []))         = continue $ turn North g
 --handleEvent g (VtyEvent (V.EvKey V.KDown []))       = continue $ turn South g
-handleEvent (VtyEvent (V.EvKey V.KLeft []))       = traceToFile "handleEvent" 'L' *> modify (move dirLeft)
-handleEvent (VtyEvent (V.EvKey V.KRight []))      = traceToFile "handleEvent" 'R' *> modify (move dirRight)
-handleEvent (VtyEvent (V.EvKey V.KEnter []))      = traceToFile "handleEvent" '_' *> modify commit
-handleEvent (VtyEvent (V.EvKey (V.KChar ' ') [])) = traceToFile "handleEvent" '_' *> modify toggle *> (get >>= paint)
+--handleEvent (VtyEvent (V.EvKey V.KLeft []))       = modify (move dirLeft)
+--handleEvent (VtyEvent (V.EvKey V.KRight []))      = modify (move dirRight)
+--handleEvent (VtyEvent (V.EvKey V.KEnter []))      = modify commit
+--handleEvent (VtyEvent (V.EvKey (V.KChar ' ') [])) = modify toggle *> (get >>= paint)
 --handleEvent g (VtyEvent (V.EvKey (V.KChar 'k') [])) = continue $ turn North g
 --handleEvent g (VtyEvent (V.EvKey (V.KChar 'j') [])) = continue $ turn South g
 --handleEvent g (VtyEvent (V.EvKey (V.KChar 'l') [])) = continue $ turn East  g
 --handleEvent g (VtyEvent (V.EvKey (V.KChar 'h') [])) = continue $ turn West  g
-handleEvent (VtyEvent (V.EvKey (V.KChar 'r') [])) = put initState
+--handleEvent (VtyEvent (V.EvKey (V.KChar 'r') [])) = put initState
 handleEvent (VtyEvent (V.EvKey (V.KChar 'q') [])) = halt
 handleEvent (VtyEvent (V.EvKey V.KEsc []))        = halt
 handleEvent _                                    = pure ()
 
 
-initState :: Integral b => SketchState b
-initState = SketchState bestMask 0 0
-
-
-
 -- Drawing
-
-drawUI :: (FiniteBits b, PrintfArg b) => SketchState b -> [Widget Name]
-drawUI st =
-  [ C.center $ padRight (Pad 2) (drawState st) <+> drawGrid st ]
-
 
 theMap :: AttrMap
 theMap = attrMap V.defAttr
@@ -99,10 +247,12 @@ theMap = attrMap V.defAttr
 emptyAttr :: AttrName
 emptyAttr = attrName "NormalIndex"
 
+
 focusAttr :: AttrName
 focusAttr = attrName "FocusedIndex"
 
 
+{-
 -- x : number you want rounded, n : number of decimal places you want...
 roundToDigits :: Int -> Double -> Double
 roundToDigits n x = (fromIntegral (floor (x * t))) / t
@@ -127,14 +277,14 @@ defineOutputDomain =
 
 
 outputFractalTo :: FilePath -> Diagram B -> IO ()
-outputFractalTo path = 
+outputFractalTo path =
           let dist = 1024
               spec = dims2D dist dist
           in  renderSVG path spec
 
 {-
 outputFractalTo :: Bits b => FilePath -> b -> IO ()
-outputFractalTo path i = 
+outputFractalTo path i =
           let dist = 1024
               draw = buildFractal $ sliceSpikeBy i
               spec = dims2D dist dist
@@ -161,7 +311,7 @@ withPrevious :: (Monoid c, HasStyle c) => Bool -> [c] -> [c]
 withPrevious focusPrev diagrams =
     let opacities :: (Double, Double)
         opacities = (1.0, 0.2)
-        
+
         selection :: (a, a) -> (a, a)
         selection
           | focusPrev = id
@@ -211,10 +361,10 @@ arrangeTransforms gen =
             # withPrevious False
             # take 4
             # sameBoundingRect
-            # rememberOrder 
-            # map (frame 0.1) 
+            # rememberOrder
+            # map (frame 0.1)
             # gridSnake
-            # showOrder 
+            # showOrder
             # lw ultraThin
 
 data  Candidate
@@ -232,15 +382,15 @@ instance Show Candidate where
             suffix = indent <$> case toAscList ps of
               []    -> pure $ "{ None }"
               x:[] -> pure $ "{ " <> show x <> " }"
-              x:xs -> pure "{" <> (show <$> x:xs) <> pure "}" 
+              x:xs -> pure "{" <> (show <$> x:xs) <> pure "}"
         in  unlines $ prefix : suffix
 
 
 forgeShuriken :: Generator Double -> QDiagram B V2 Double Any
-forgeShuriken = 
+forgeShuriken =
     let makeImage :: Trail V2 Double -> QDiagram B V2 Double Any
         makeImage = (# lw ultraThin) . trailLike . (`at` origin)
-    in  makeImage . flip shurikenUsing 4 
+    in  makeImage . flip shurikenUsing 4
 
 
 paint :: (Bits b, MonadIO m) => SketchState b -> m ()
@@ -286,7 +436,7 @@ bestMask = 0x00000000c56c
 --bestMask = 0x000101837
 --bestMask = 0x000101C37
 --bestMask = 0x000100C37
---bestMask = 0x1e007d610 
+--bestMask = 0x1e007d610
 --bestMask = 0x3c05f9f3365
 --bestMask = 0x3c05f981507
 --bestMask = 0x3c475f55577
@@ -304,7 +454,7 @@ main =
     in case x of
        0 -> main0
        1 -> main1
-       _ -> main2 
+       _ -> main2
 
 
 main0 :: IO ()
@@ -312,21 +462,8 @@ main0 = outputFractalTo fractalFilePath $ forgeShuriken sliceSpikeSeries4
     -- outputManyFractals $ [ bestMask :: Word64 ]
 
 
-main1 :: IO ()
-main1 = do
-    chan <- newBChan 10
-    void . forkIO . forever $ do
-        writeBChan chan Tick
-        threadDelay 100000000
-    let app' = app :: App (SketchState Word64) Tick Name
-    let builder = V.mkVty V.defaultConfig
-    initialVty <- builder
---    void $ customMain initialVty builder (Just chan) app' initState
-    void $ customMain initialVty builder Nothing app' initState
-
-
 main2 :: IO ()
-main2 = 
+main2 =
   let
 {-
       intersections :: Located (Trail V2 Double) -> [Point V2 Double]
@@ -345,7 +482,7 @@ main2 =
              pointDot :: Point V2 Double -> QDiagram B V2 Double Any -- P2 Double -> _
              pointDot = trailLike . at (scale (1 / 72) pntCirc)
 
-             pointImg :: [Point V2 Double] -> QDiagram B V2 Double Any -- [P2 Double] -> Diagram B 
+             pointImg :: [Point V2 Double] -> QDiagram B V2 Double Any -- [P2 Double] -> Diagram B
              pointImg = foldMap pointDot
 
          in  outputFractalTo "slice-spike.svg" . pointImg . toAscList . _candidatePoints
@@ -358,9 +495,9 @@ main2 =
       domain :: [Word]
       domain = [ 0x000000005d4b .. 2 ^ 36 ]
 --                    let i = (<> " ") . show . fromEnum $ _candidateIndex c
---                        b = 
+--                        b =
 --                    in  hPutStr stdout i *> hFlush stdout $> b
-      
+
 
   in  performSearch domain   -- pointsToSVG =<< considerIndex (bestMask :: Word)
 
@@ -371,7 +508,7 @@ performSearch =
     let ponder :: (Bits i, Integral i) => i -> Arg Int Candidate
         ponder = (Arg <$> length . _candidatePoints <*> id) . considerIndex
         update :: (Bits p, Integral p) => IORef (Arg Int Candidate) -> p -> IO ()
-        update ref key = 
+        update ref key =
             let val@(Arg len _) = ponder key
             in  writeIORef ref val *> print len
     in  \case
@@ -396,7 +533,7 @@ performSearch =
                 putStrLn "Searching ..."
                 update currentMinima x
                 go xs *> printMin
-                
+
 
 --            traverse_ (print <=< considerIndex) [ bestMask :: Word ]
 
@@ -411,10 +548,10 @@ considerIndex =
 
         --intersectionPoints :: MonadIO m => Located (Trail V2 Double) -> m (Set (P2 Double))
         --intersectionPoints = fmap fold . zipWithM intersectionCheck [ 0 .. ] . segmentPairings
-  
+
         -- trailLocSegments :: Located (Trail v n) -> [Located (Segment Closed v n)]
         -- fromLocSegments  :: TrailLike t => Located [Segment Closed (V t) (N t)] -> t
-  
+
         intersectionCheck
             :: ([Located (Segment Closed V2 Double)], Located (Segment Closed V2 Double))
             -> (Set (P2 Double))
@@ -427,7 +564,7 @@ considerIndex =
                 --opIO = outputFractalTo outputPath
             in   --liftIO $ pure diagramFig
                 fromList $ fmap (roundToDigits 5) <$> intersectPointsT prevTrail currTrail
-  
+
         segmentPairings
             :: ( Floating n, Ord n )
             => Located (Trail V2 n)
@@ -439,8 +576,8 @@ considerIndex =
                   x2:xs ->
                       let next = go (pref [x1] <>) $ x2:|xs
                           curr = (pref [], x2)
-                      in  curr : next 
-  
+                      in  curr : next
+
             in  case trailLocSegments trail of
                   [] -> []
                   x:xs -> go id $ x:|xs
@@ -448,3 +585,4 @@ considerIndex =
     in   Candidate
             <$> (toEnum . fromIntegral)
             <*> (intersectionPoints . genTrailT2)
+-}

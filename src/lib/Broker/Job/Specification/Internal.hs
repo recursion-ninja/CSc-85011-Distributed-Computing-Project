@@ -19,8 +19,8 @@ import Broker.Job.Class
 import Broker.Job.Generic
 import Data.Aeson.Types
 import Data.ByteString (ByteString)
---import Data.Foldable (fold, toList)
 import Data.Functor.Identity
+import Data.Text (Text)
 import Data.Word
 import Lens.Micro (Lens', (^.), (.~), lens)
 
@@ -117,18 +117,29 @@ instance HasJobGPUs JobSpecification Word64 where
     jobGPUs = lensSpec getJobMetadata setJobMetadata jobGPUs
 
 
-instance HasJobMail JobMetadata String where
+instance HasJobMail JobMetadata Text where
 
     {-# INLINE jobMail #-}
-    jobMail :: Lens' JobMetadata String
-    jobMail = lensMeta jobMail
+    jobMail :: Lens' JobMetadata Text
+    jobMail =
+        let get = (^. jobMail) . unMeta
+
+            set :: HasJobMail (JobMetadataT Identity) b => JobMetadata -> b -> JobMetadata
+            set jm x = JobMetadata . (jobMail .~ x) . unMeta $ jm
+
+        in  lens get set
 
 
-instance HasJobMail JobSpecification String where
+instance HasJobMail JobSpecification Text where
 
     {-# INLINE jobMail #-}
-    jobMail :: Lens' JobSpecification String
-    jobMail = lensSpec getJobMetadata setJobMetadata jobMail
+    jobMail :: Lens' JobSpecification Text
+    jobMail = 
+        let get = (^. jobMail) . getJobMetadata . unSpec
+            set :: HasJobMail (JobMetadataT Identity) b => JobSpecification -> b -> JobSpecification
+            set (JobSpecification js) x = JobSpecification . (`setJobMetadata` js) . (jobMail .~ x) . getJobMetadata $ js
+
+        in  lens get set
 
 
 instance HasJobRAM  JobMetadata Word64 where

@@ -22,6 +22,7 @@ import Data.ByteString (ByteString)
 import Data.Foldable (fold, toList)
 import Data.Functor.Classes (Eq1, Ord1, Show1)
 import Data.Word
+import Data.Text (Text)
 import Lens.Micro (Lens', lens)
 import Data.Aeson.Types
 
@@ -35,7 +36,7 @@ data  JobBinaryStreamsT f
 
 data  JobMetadataT f
     = JobMetadataT
-    { jobMetaMail :: f String
+    { jobMetaMail :: Text
     , jobMetaTime :: f Word64
     , jobMetaDisk :: f Word64
     , jobMetaRAM  :: f Word64
@@ -110,10 +111,10 @@ instance HasJobGPUs (JobMetadataT f) (f Word64) where
         in  fmap so . f $ jobMetaGPUs jm
 
 
-instance HasJobMail (JobMetadataT f) (f String) where
+instance HasJobMail (JobMetadataT f) Text where
 
     {-# INLINE jobMail #-}
-    jobMail :: Lens' (JobMetadataT f) (f String)
+    jobMail :: Lens' (JobMetadataT f) Text
     jobMail f jm =
         let so x = jm { jobMetaMail = x }
         in  fmap so . f $ jobMetaMail jm
@@ -180,10 +181,10 @@ instance HasJobGPUs (JobSpecificationT f) (f Word64) where
         in  js { getJobMetadata = jm { jobMetaGPUs = x } }
 
 
-instance HasJobMail (JobSpecificationT f) (f String) where
+instance HasJobMail (JobSpecificationT f) Text where
 
     {-# INLINE jobMail #-}
-    jobMail :: Lens' (JobSpecificationT f) (f String)
+    jobMail :: Lens' (JobSpecificationT f) Text
     jobMail = lens (jobMetaMail . getJobMetadata) $ \js x ->
         let jm = getJobMetadata js
         in  js { getJobMetadata = jm { jobMetaMail = x } }
@@ -241,9 +242,7 @@ setJobStreams v js = js { getJobStreams = v }
 metadataInputKeyValues :: forall f kv. (Foldable f, KeyValue kv) => JobMetadataT f -> [kv]
 metadataInputKeyValues obj =
     let prefix :: [kv]
-        prefix = gatherKeyValues obj
-            [ ( "Mail", jobMetaMail )
-            ]
+        prefix = [ "Mail" .= jobMetaMail obj ]
 
         suffix :: [kv]
         suffix = gatherKeyValues obj
