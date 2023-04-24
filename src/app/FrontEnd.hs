@@ -132,18 +132,15 @@ frontendApp = App
 
 jobSpecificationForm :: UserInputJob -> Form UserInputJob e Name
 jobSpecificationForm =
-    let -- editNumericField :: (Ord n, Show n, Read a, Show a) => Lens' s a -> n -> s -> FormFieldState s e n
-        -- editNumericField x n = editShowableFieldWithValidate x n (const True)
-
-        byGetting f g n x = f (g x) n 
-        
+    let valueBox = withBorderStyle BS.unicodeBold . hLimit 42
+        label s w = padBottom (Pad 1) $ (vLimit 1 $ hLimit 6 $ str (s<>":") <+> fill ' ') <+> valueBox w
     in  newForm
-            [ editTextField jobMail InputField_Mail (Just 1)
-            , editShowableField (jobTime :: Lens' UserInputJob (UserInput Word64)) InputField_Time
-            , editShowableField (jobDisk :: Lens' UserInputJob (UserInput Word64)) InputField_Disk
-            , editShowableField (jobRAM  :: Lens' UserInputJob (UserInput Word64)) InputField_RAM
-            , editShowableField (jobCPUs :: Lens' UserInputJob (UserInput Word64)) InputField_CPUs
-            , editShowableField (jobGPUs :: Lens' UserInputJob (UserInput Word64)) InputField_GPUs
+            [ label "Mail" @@= editTextField jobMail InputField_Mail (Just 1)
+            , label "Time" @@= editShowableField (jobTime :: Lens' UserInputJob (UserInput Word64)) InputField_Time
+            , label "Disk" @@= editShowableField (jobDisk :: Lens' UserInputJob (UserInput Word64)) InputField_Disk
+            , label "RAM"  @@= editShowableField (jobRAM  :: Lens' UserInputJob (UserInput Word64)) InputField_RAM
+            , label "CPUs" @@= editShowableField (jobCPUs :: Lens' UserInputJob (UserInput Word64)) InputField_CPUs
+            , label "GPUs" @@= editShowableField (jobGPUs :: Lens' UserInputJob (UserInput Word64)) InputField_GPUs
 --            , editNumericField jobTime InputField_Time
 --            , editNumericField jobDisk InputField_Disk
 --            , editNumericField jobRAM  InputField_RAM
@@ -153,19 +150,42 @@ jobSpecificationForm =
 
 
 drawTUI :: FrontEndTermState -> [Widget Name]
-drawTUI st =
-    let drawnTitle = C.center drawPreamble
-    in  [ drawnTitle, renderForm . jobSpecificationForm $ inputJob st ]
+drawTUI st = pure . C.center $ vBox
+    [ drawPreamble
+    , drawUserInput st
+    ]
 
 
 drawPreamble :: Widget Name
 drawPreamble =
-    let drawTitle = withBorderStyle BS.unicodeBold
---          . B.borderWithLabel (str "Shifts")
+    let drawLine  = hLimit 16 . str
+        drawTitle = padTopBottom 2
+          . withBorderStyle BS.unicodeBold
+          . B.borderWithLabel (str "STREAM User Endpoint")
+          . hLimit 26
           . C.hCenter
-          . padAll 1
-          . str 
-    in  hLimit 24 . padTop (Pad 2) $ drawTitle "Front End Terminal"
+          . padTopBottom 1
+          . vBox
+          . fmap drawLine
+    in  padTop (Pad 2) $ drawTitle
+            [ "S - Simple"
+            , "T - Transparent"
+            , "R - Resource"
+            , "E - Exchange"
+            , "A - And"
+            , "M - Management"
+            ]
+          
+
+
+drawUserInput :: FrontEndTermState -> Widget Name
+drawUserInput = id 
+    . hLimit 48
+    . C.hCenter
+    . padTopBottom 1
+    . renderForm
+    . jobSpecificationForm
+    . inputJob
 
 
 {-
@@ -241,6 +261,7 @@ handleEvent _                                    = pure ()
 theMap :: AttrMap
 theMap = attrMap V.defAttr
   [ (focusAttr, (V.red `on` V.white) `V.withStyle` V.bold)
+  , (focusedFormInputAttr, (V.red `on` V.white) `V.withStyle` V.bold)
   ]
 
 
