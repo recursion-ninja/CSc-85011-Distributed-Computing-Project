@@ -79,19 +79,14 @@ Testing possible scheduling algorithms that are:
 \end{itemize}
 
 Because we focus on monitoring our brokering network's resource management and performance. Those three algorithms have different advantages and disadvantages. 
-\subsection{Domains}
 
-\begin{center}\textbf{\texttt{T~O~D~O}}\end{center}
+
+\subsection{Domains}
 
 Within the multi-could topology, there are many \KeyWord{Domain}s.
 Each \KeyWord{Domain} contributes one or more computing resources to the multi-could topology.
 Additionally, each \KeyWord{Domain} locally hosts an \KeyWord{Endpoint} from which a \KeyWord{User} within the \KeyWord{Domain} can access the computing resources of the science brokering service by submitting a \KeyWord{Job}.
 Networked communication and computations across domains are dynamically mediated by the \KeyWord{Broker}.
-
-
-\subsection{Replication}
-
-\begin{center}\textbf{\texttt{T~O~D~O}}\end{center}
 
 
 \subsection{Jobs}
@@ -110,6 +105,8 @@ A \KeyWord{Job} contains the following information:
 \end{itemize}
 
 The \KeyWord{Broker} can process a \KeyWord{Job}, and decide which resources to allocate to fulfill the job request across the \KeyWord{Domain}s.
+When a \KeyWord{Job} is executed, it does so with a Docker container.
+This containerization is seamlessly performed by the science brokering service.
 
 
 \subsection{User Interface}
