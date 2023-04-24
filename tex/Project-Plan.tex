@@ -68,6 +68,13 @@ Encapsulated within the \KeyWord{Broker} is the maintenance of an ACID database 
 
 Additionally, the \KeyWord{Broker} executes a scheduling algorithm to determine which queued \KeyWord{Job} will be given which resource(s) and when a \KeyWord{Job} will be migrated.
 
+\begin{figure}
+	\includegraphics[width=\textwidth]{Backend-API-Demo.jpeg}
+	\caption{Example request received by ``Back-end''  \KeyWord{Broker}.}
+\end{figure}
+
+
+
 
 \subsection{Scheduling \& Queuing}
 
@@ -75,7 +82,7 @@ Testing possible scheduling algorithms that are:
 \begin{itemize}
 \item FCFS(first come first serve)
 \item SJF(shortest job first)
-\item RR(round robing)
+\item RR(round robin)
 \end{itemize}
 
 Because we focus on monitoring our brokering network's resource management and performance. Those three algorithms have different advantages and disadvantages. 
@@ -121,7 +128,7 @@ Subsequently, the \KeyWord{Job} information is encoded as JSON by the \KeyWord{E
 
 \begin{figure}
 \includegraphics[width=\textwidth]{Frontend-Mockup.png}
-\caption{A mock-up of the ``Front-end'' Terminal User Interface}
+\caption{A mock-up of the ``Front-end'' Terminal User Interface.}
 \end{figure}
 
 
