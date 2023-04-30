@@ -41,11 +41,6 @@ common build-config
     GHC2021
 
   ghc-options:
-    -- Concurrency
-    -rtsopts
-    -threaded
-    -with-rtsopts=-N
-
     -- Optimization flags
     -O2
     -fexcess-precision
@@ -79,7 +74,8 @@ common build-config
     -Wno-unsafe
 
     -Wno-unused-top-binds
-        
+
+    
 Executable science-broker-terminal
 
   import:
@@ -87,11 +83,21 @@ Executable science-broker-terminal
 
   build-depends:
     science-broker:terminal-layout,
+    aeson,
     base >=4.7 && <5,
     brick,
+--    bytestring,
     containers,
+    directory,
+    Glob,
+    http-client,
+    http-types,
     microlens,
+    microlens-th,
+--    optparse-applicative,
+    text,
     unix,
+    vector,
     vty
                      
   ghc-options:
@@ -99,11 +105,16 @@ Executable science-broker-terminal
     -threaded
     -with-rtsopts=-N
 
+    -ddump-splices     
+
   hs-source-dirs:
     app
 
   main-is:
     FrontEnd.hs
+
+  other-extensions:
+    TemplateHaskell
 
 
 Library terminal-layout
@@ -114,26 +125,22 @@ Library terminal-layout
   build-depends:
     aeson,
     base >=4.7 && <5,
-    bytestring,
     microlens,
-    text
+    microlens-th,
+    network-uri,
+    optparse-applicative,
+    text,
     
   exposed-modules:
-    Broker.Job.Class
+    Broker.CommandLineOptions
     Broker.Job.Input
     Broker.Job.Specification
-    Data.Validation
 
   hs-source-dirs:
     lib
 
   other-extensions:
     TemplateHaskell
-
-  other-modules:
-    Broker.Job.Input.Internal
-    Broker.Job.Generic
-    Broker.Job.Specification.Internal
 
   visibility:
     private
