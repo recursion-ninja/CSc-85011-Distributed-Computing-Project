@@ -84,9 +84,10 @@ Executable science-broker-terminal
   build-depends:
     science-broker:terminal-layout,
     aeson,
+    aeson-pretty,
     base >=4.7 && <5,
     brick,
---    bytestring,
+    bytestring,
     containers,
     directory,
     Glob,

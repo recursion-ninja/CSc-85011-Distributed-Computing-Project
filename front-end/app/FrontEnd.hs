@@ -28,6 +28,8 @@ import Control.Exception (displayException)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Aeson (encode)
 import Data.Aeson.Types
+import Data.Aeson.Encode.Pretty (encodePretty)
+import Data.ByteString.Lazy.Char8 qualified as BS
 import Data.Foldable (fold, toList)
 import Data.Functor
 import Data.Set (Set)
@@ -464,10 +466,10 @@ sendJobRequest manager gateway input files =
             putStrLn $ "The status code was: " <> (show $ statusCode $ responseStatus response)
 
     in  do  initialRequest <- parseRequest $ show gateway
-            traceToFile "Gateway" gateway
-            traceToFile "JSON object to send" $ toJSON $ buildJobSpecification files input
-            print . toJSON $ buildJobSpecification files input
-            print (request initialRequest)
+            traceToFile "Gateway" $ show gateway
+            traceToFile "JSON object to send" . BS.unpack . encodePretty $ toJSON $ buildJobSpecification files input
+--            print . BS.unpack . encodePretty . toJSON $ buildJobSpecification files input
+--            print (request initialRequest)
             withResponse (request initialRequest) manager handler
 
 
@@ -475,10 +477,10 @@ logFileHandle :: IORef Handle
 logFileHandle = unsafePerformIO $ openFile "brick.log" WriteMode >>= newIORef
 
 
-traceToFile :: (MonadIO m, Show a) => String -> a -> m ()
+traceToFile :: (MonadIO m) => String -> String -> m ()
 traceToFile key val =
     let writeOut :: Handle -> IO ()
-        writeOut h = hPutStrLn h (key <> ":\t" <> show val) *> hFlush h
+        writeOut h = hPutStrLn h (key <> ":\t" <> val) *> hFlush h
 
         logKeyValPair :: IO ()
         logKeyValPair = readIORef logFileHandle >>= writeOut
