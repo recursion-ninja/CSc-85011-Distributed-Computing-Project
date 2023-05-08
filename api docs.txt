@@ -1,0 +1,75 @@
+---------------------------Broking system API---------------------------
+
+See list of domains:
+
+curl --location --request GET 'http://192.86.139.79:8080/api/domains'
+
+-------------------------------------------------------------------------
+
+Add a domain to the system:
+
+curl --location --request POST 'http://192.86.139.79:8080/api/domains' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "ip": "192.122.236.108",
+    "availableDiskSpace": 12000
+}'
+
+-------------------------------------------------------------------------
+
+Create a job:
+
+curl --location --request POST 'http://192.86.139.79:8080/api/jobs' \
+--header 'Content-Type: application/json' \
+--data-raw '[
+    {
+    "fileName": "sago1.mp4",
+    "diskSpace": 100,
+    "priority": "LOW",
+    "userEmail": "isa.jafarov.01@gmail.com"
+},
+{
+    "fileName": "sago2.mp4",
+    "diskSpace": 110,
+    "priority": "HIGH",
+    "userEmail": "isa.jafarov.02@gmail.com"
+}
+]'
+
+------------------------------------Domain API--------------------------
+
+Upload video file:
+
+curl --location --request POST 'http://165.230.161.235:8080/api/files' \
+--form 'file=@"/home/isa/Videos/filename.mkv"'
+
+It returns an number, which is ID of the job. Use that ID to check status and download audio.
+
+-------------------------------------------------------------------------
+
+Check job status(WAITING, PROCESSING, FINISHED):
+
+curl --location --request GET 'http://165.230.161.235:8080/api/status/{job-id}'
+
+-------------------------------------------------------------------------
+
+Download audio when the status is FINISHED:
+
+curl --location --request GET 'http://165.230.161.235:8080/api/files/{job-id}'
+
+-------------------------------------------------------------------------
+
+Update job status (this is for Nan)
+
+curl --location --request PUT 'http://165.230.161.235:8080/api/status' \
+--header 'Content-Type: application/json' \
+--data-raw '{
+    "fileName": "sago.mp4",
+    "status": "PROCESSING"
+}'
+
+
+
+
+
+
