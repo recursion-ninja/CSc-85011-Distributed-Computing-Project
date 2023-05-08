@@ -2,59 +2,48 @@
 {-# Language FlexibleContexts #-}
 {-# Language ImportQualifiedPost #-}
 {-# Language LambdaCase #-}
+{-# Language OverloadedStrings #-}
 {-# Language StandaloneDeriving #-}
 {-# Language StrictData #-}
+{-# Language TemplateHaskell #-}
 
 module Main
   ( main
   ) where
 
-import Data.Bits (Bits(..), FiniteBits(..))
-import Data.Char (isDigit)
-import Data.Foldable (traverse_)
-import Data.Functor
-import Data.List.NonEmpty (NonEmpty(..))
-import Data.Set (Set, fromList, toAscList)
-import Data.Tuple (swap)
-import Data.Word
---import GHC.Exts (fromList)
---import Numeric (showIntAtBase)
-import Text.Printf
-
-
-import Brick hiding (Direction)
-import Brick.BChan (newBChan, writeBChan)
+import Brick hiding (Direction, Max)
 import Brick.Forms
+import Brick.Widgets.Border
 import Brick.Widgets.Border qualified as B
 import Brick.Widgets.Border.Style qualified as BS
+import Brick.Widgets.Center (hCenter)
 import Brick.Widgets.Center qualified as C
-
+import Brick.Widgets.Edit qualified as E
+import Brick.Widgets.FileBrowser
+import Brick.Widgets.FileBrowser qualified as FB
+import Broker.CommandLineOptions
 import Broker.Job.Input
 import Broker.Job.Specification
-
-import Control.Concurrent (forkIO, killThread, myThreadId, threadDelay)
---import Control.Concurrent.STM.TVar (readTVar)
---import Control.Monad.STM (atomically)
-import Control.Monad (forever)
+import Control.Exception (displayException)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Graphics.Vty qualified as V
---import Data.Sequence (Seq)
---import qualified Data.Sequence as S
---import Linear.V2 (V2(..))
---import Lens.Micro ((^.))
-
+import Data.Aeson (encode)
+import Data.Aeson.Types
+import Data.Aeson.Encode.Pretty (encodePretty)
+import Data.ByteString.Lazy.Char8 qualified as BS
+import Data.Foldable (fold, toList)
+import Data.Functor
+import Data.Set (Set)
 import Data.IORef
-import Lens.Micro (Lens', lens)
+import Data.Text (Text, pack, unpack)
+import Data.Vector (Vector)
+import GHC.Exts (fromList)
+import Graphics.Vty (Event(..), Key(..), Modifier(..))
+import Graphics.Vty qualified as V
+import Lens.Micro (Lens', (^.), (.~), (%~))
+import Network.HTTP.Client
+import Network.HTTP.Types.Status
 import System.IO
 import System.IO.Unsafe
-
-import System.Posix.Signals
-
-
--- | Ticks mark passing of time
---
--- This is our custom event that will be constantly fed into the app.
-data Tick = Tick
 
 
 -- | Named resources
@@ -65,545 +54,435 @@ data Tick = Tick
 data  Name
     = InputField_Mail
     | InputField_Time
-    | InputField_Disk
-    | InputField_RAM
-    | InputField_CPUs
-    | InputField_GPUs
-     deriving (Eq, Ord, Show)
+    | InputField_Nil
+    | InputField_Low
+    | InputField_Mid
+    | InputField_Max
+    | InputField_List
+    | Browser_FileSystem
+    deriving (Eq, Ord, Show)
 
 
-data  FocusedField
+data  FocusedPane
+    = PaneMetadata
+    | PaneFileData
+    | PaneSendTask
 
 
-data  FrontEndTermState
+deriving stock instance Eq FocusedPane
+
+
+deriving stock instance Ord FocusedPane
+
+
+deriving stock instance Show FocusedPane
+
+
+data  FrontEndTermState e
     = FrontEndTermState
-    { inputJob   :: UserInputJob
---    , inputFocus :: FocusedField
+    { _inputFocused :: FocusedPane
+    , _inputJobForm :: Form JobInput e Name
+    , _fileSelector :: FileBrowser Name
+    , _choosenFiles :: Set (FilePath, Disk)
+    , _managerHTTPS :: Manager
+    , _givenArgsCLI :: CommandLineOptions
     }
 
 
-data  BinarySI
-    = Kibi
-    | Mibi
-    | Gibi
-    | Tibi
-    | Pibi
-    | Eibi
-    | Zibi
-    | Yibi
+{-# INLINE inputFocused #-}
+inputFocused :: forall a. Lens' (FrontEndTermState a) FocusedPane
+inputFocused f st = (\v -> st { _inputFocused = v }) <$> f (_inputFocused st)
 
 
-data  DecimalSI
-    = Kilo
-    | Mega
-    | Giga
-    | Tera
-    | Peta
-    | Exa
-    | Zetta
-    | Yotta
+{-# INLINE inputJobForm #-}
+inputJobForm :: forall a. Lens'
+    (FrontEndTermState a)
+    (Form JobInput a Name)
+inputJobForm f st = (\v -> st { _inputJobForm = v }) <$> f (_inputJobForm st)
+
+
+{-# INLINE fileSelector #-}
+fileSelector :: forall a. Lens'
+    (FrontEndTermState a)
+    (FileBrowser Name)
+fileSelector f st = (\v -> st { _fileSelector = v }) <$> f (_fileSelector st)
+
+
+{-# INLINE choosenFiles #-}
+choosenFiles :: forall a. Lens'
+    (FrontEndTermState a)
+    (Set (FilePath, Disk))
+choosenFiles f st = (\v -> st { _choosenFiles = v }) <$> f (_choosenFiles st)
+
+
+{-# INLINE managerHTTPS #-}
+managerHTTPS :: forall a. Lens' (FrontEndTermState a) Manager
+managerHTTPS f st = (\v -> st { _managerHTTPS = v }) <$> f (_managerHTTPS st)
+
+
+{-# INLINE givenArgsCLI #-}
+givenArgsCLI :: forall a. Lens' (FrontEndTermState a) CommandLineOptions
+givenArgsCLI f st = (\v -> st { _givenArgsCLI = v }) <$> f (_givenArgsCLI st)
 
 
 main :: IO ()
-main = do
-    chan <- newBChan 10
-    void . forkIO . forever $ do
-        writeBChan chan Tick
-        threadDelay 100000000
-    let builder = V.mkVty V.defaultConfig
-    initialVty <- builder
---    void $ customMain initialVty builder (Just chan) app' initState
-    void $ customMain initialVty builder Nothing frontendApp initState
+main =
+    let initializeState :: CommandLineOptions -> Manager -> IO (FrontEndTermState e)
+        initializeState opts netMan = newFileBrowser selectNonDirectories Browser_FileSystem Nothing >>=
+            \browser ->
+                pure FrontEndTermState
+                { _inputFocused = PaneMetadata
+                , _inputJobForm = jobSpecificationForm blankJobInput
+                , _fileSelector = browser
+                , _choosenFiles = mempty
+                , _managerHTTPS = netMan
+                , _givenArgsCLI = opts
+                }
+
+        frontendApp :: App (FrontEndTermState e) e Name
+        frontendApp = App
+            { appAttrMap      = const theMap
+            , appChooseCursor = showFirstCursor
+            , appDraw         = drawTUI
+            , appHandleEvent  = handleEvent
+            , appStartEvent   = return ()
+            }
+
+        builder = V.mkVty V.defaultConfig
+
+    in  do  optionsCLI <- getCommandLineOptions
+            netManager <- newManager defaultManagerSettings
+            initialVty <- builder
+            initState  <- initializeState optionsCLI netManager
+            void $ customMain initialVty builder Nothing frontendApp initState
 
 
-initState :: FrontEndTermState
-initState = FrontEndTermState userInputEmptyJob
+handleEvent :: BrickEvent Name e -> EventM Name (FrontEndTermState e) ()
+handleEvent bEvent = do
+    pane <- gets (^. inputFocused)
 
-
-frontendApp :: App FrontEndTermState Tick Name
-frontendApp = App
-    { appAttrMap      = const theMap
-    , appChooseCursor = showFirstCursor
-    , appDraw         = drawTUI
-    , appHandleEvent  = handleEvent
-    , appStartEvent   = return ()
-    }
-
-
-jobSpecificationForm :: UserInputJob -> Form UserInputJob e Name
-jobSpecificationForm =
-    let valueBox = withBorderStyle BS.unicodeBold . hLimit 42
-        label s w = padBottom (Pad 1) $ (vLimit 1 $ hLimit 6 $ str (s<>":") <+> fill ' ') <+> valueBox w
-    in  newForm
-            [ label "Mail" @@= editTextField jobMail InputField_Mail (Just 1)
-            , label "Time" @@= editShowableField (jobTime :: Lens' UserInputJob (UserInput Word64)) InputField_Time
-            , label "Disk" @@= editShowableField (jobDisk :: Lens' UserInputJob (UserInput Word64)) InputField_Disk
-            , label "RAM"  @@= editShowableField (jobRAM  :: Lens' UserInputJob (UserInput Word64)) InputField_RAM
-            , label "CPUs" @@= editShowableField (jobCPUs :: Lens' UserInputJob (UserInput Word64)) InputField_CPUs
-            , label "GPUs" @@= editShowableField (jobGPUs :: Lens' UserInputJob (UserInput Word64)) InputField_GPUs
---            , editNumericField jobTime InputField_Time
---            , editNumericField jobDisk InputField_Disk
---            , editNumericField jobRAM  InputField_RAM
---            , editNumericField jobCPUs InputField_CPUs
---            , editNumericField jobGPUs InputField_GPUs
-            ]
-
-
-drawTUI :: FrontEndTermState -> [Widget Name]
-drawTUI st = pure . C.center $ vBox
-    [ drawPreamble
-    , drawUserInput st
-    ]
-
-
-drawPreamble :: Widget Name
-drawPreamble =
-    let drawLine  = hLimit 16 . str
-        drawTitle = padTopBottom 2
-          . withBorderStyle BS.unicodeBold
-          . B.borderWithLabel (str "STREAM User Endpoint")
-          . hLimit 26
-          . C.hCenter
-          . padTopBottom 1
-          . vBox
-          . fmap drawLine
-    in  padTop (Pad 2) $ drawTitle
-            [ "S - Simple"
-            , "T - Transparent"
-            , "R - Resource"
-            , "E - Exchange"
-            , "A - And"
-            , "M - Management"
-            ]
-          
-
-
-drawUserInput :: FrontEndTermState -> Widget Name
-drawUserInput = id 
-    . hLimit 48
-    . C.hCenter
-    . padTopBottom 1
-    . renderForm
-    . jobSpecificationForm
-    . inputJob
-
-
+    case bEvent of
+        VtyEvent (EvResize    {}) -> return ()
+        VtyEvent (EvKey KEsc   []) -> halt
+        VtyEvent (EvKey (KChar '|') _)   -> modify $ (inputFocused .~ PaneSendTask)
+        VtyEvent (EvKey KLeft  [MShift]) -> modify $ (inputFocused .~ PaneMetadata)
+        VtyEvent (EvKey KRight [MShift]) -> modify $ (inputFocused .~ PaneFileData)
 {-
-drawState :: PrintfArg b => SketchState b -> Widget Name
-drawState st =
-    let drawIndex :: PrintfArg b => b -> Widget Name
-        drawIndex = withBorderStyle BS.unicodeBold
-          . B.borderWithLabel (str "Stored")
-          . C.hCenter
-          . padAll 1
-          . str . printf shapeIndexformatStr
+        -- Enter quits only when we aren't in the multi-line editor.
+        VtyEvent (V.EvKey V.KEnter [])
+            | focusGetCurrent f /= Just AddressField -> halt
 
-        drawShift :: PrintfArg b => b -> Widget Name
-        drawShift = withBorderStyle BS.unicodeBold
-          . B.borderWithLabel (str "Shifts")
-          . C.hCenter
-          . padAll 1
-          . str . printf shapeIndexformatStr
-
-    in  hLimit 24 $ vBox
-         [ drawIndex $ sketchIndex st
-         , padTop (Pad 2) $ drawShift $ sketchShift st
-         ]
-
-
-drawGrid :: FiniteBits b => SketchState b -> Widget Name
-drawGrid st =
-    let focus = fromEnum $ hoveringAt st
-
-        renderQueriedBit False = "0"
-        renderQueriedBit True  = "1"
-        
-        renderFiniteBitCells :: FiniteBits b => b -> [Widget n]
-        renderFiniteBitCells b = drawCell b <$> [ 0 .. finiteBitSize b - 1 ]
-
---        cellWidget :: FiniteBits b => b -> String
---        cellWidget i = 
-
-        drawCell :: Bits p => p -> Int -> Widget n
-        drawCell b i =
-            let c :: Widget n
-                c = str . renderQueriedBit $ testBit b i
-
-                f :: AttrName -> Widget n
-                f = flip withAttr c
-            in  if   i == focus
-                then f focusAttr
-                else f emptyAttr
-
-    in  withBorderStyle BS.unicodeBold
+        VtyEvent (EvKey (V.KChar '\t') [])
+            | curr == final -> pure () -- TODO go to FileSelector
 -}
+        _ -> case pane of
+            PaneMetadata -> zoom inputJobForm $ do
+                handleFormEvent bEvent
 
-handleEvent :: BrickEvent Name Tick -> EventM Name FrontEndTermState ()
---handleEvent (AppEvent Tick)                      = pure () --continue $ step g
---handleEvent g (VtyEvent (V.EvKey V.KUp []))         = continue $ turn North g
---handleEvent g (VtyEvent (V.EvKey V.KDown []))       = continue $ turn South g
---handleEvent (VtyEvent (V.EvKey V.KLeft []))       = modify (move dirLeft)
---handleEvent (VtyEvent (V.EvKey V.KRight []))      = modify (move dirRight)
---handleEvent (VtyEvent (V.EvKey V.KEnter []))      = modify commit
---handleEvent (VtyEvent (V.EvKey (V.KChar ' ') [])) = modify toggle *> (get >>= paint)
---handleEvent g (VtyEvent (V.EvKey (V.KChar 'k') [])) = continue $ turn North g
---handleEvent g (VtyEvent (V.EvKey (V.KChar 'j') [])) = continue $ turn South g
---handleEvent g (VtyEvent (V.EvKey (V.KChar 'l') [])) = continue $ turn East  g
---handleEvent g (VtyEvent (V.EvKey (V.KChar 'h') [])) = continue $ turn West  g
---handleEvent (VtyEvent (V.EvKey (V.KChar 'r') [])) = put initState
-handleEvent (VtyEvent (V.EvKey (V.KChar 'q') [])) = halt
-handleEvent (VtyEvent (V.EvKey V.KEsc []))        = halt
-handleEvent _                                    = pure ()
+            PaneFileData -> do
+                markedFiles <- zoom fileSelector $ do
+                    case bEvent of
+                        VtyEvent event -> do
+                            handleFileBrowserEvent event
+                            case event of
+                                V.EvKey V.KEnter [] -> getMarkedFiles
+                                _ -> pure mempty
+                modify (choosenFiles %~ (<> markedFiles))
+
+            PaneSendTask -> case bEvent of
+                VtyEvent (EvKey KEnter _) -> do
+                    liftIO $ putStrLn "ENTERED"
+                    mangr <- gets (^. managerHTTPS)
+                    servr <- gets (gateway . (^. givenArgsCLI))
+                    files <- gets (^. choosenFiles)
+                    input <- gets (formState . (^. inputJobForm))
+                    liftIO $ sendJobRequest mangr servr input files
+                _ -> pure ()
 
 
 -- Drawing
 
 theMap :: AttrMap
 theMap = attrMap V.defAttr
-  [ (focusAttr, (V.red `on` V.white) `V.withStyle` V.bold)
-  , (focusedFormInputAttr, (V.red `on` V.white) `V.withStyle` V.bold)
-  ]
+    [ ( E.editFocusedAttr   , V.black `on` V.yellow )
+    , ( invalidFormInputAttr, V.white `on` V.red    )
+    , ( focusedFormInputAttr, V.black `on` V.yellow )
+    , ( readySend           , V.blue  `on` V.green )
+    ]
 
 
-emptyAttr :: AttrName
-emptyAttr = attrName "NormalIndex"
+errorAttr :: AttrName
+errorAttr = attrName "error"
 
 
-focusAttr :: AttrName
-focusAttr = attrName "FocusedIndex"
+readySend :: AttrName
+readySend = attrName "readySend"
 
 
-{-
--- x : number you want rounded, n : number of decimal places you want...
-roundToDigits :: Int -> Double -> Double
-roundToDigits n x = (fromIntegral (floor (x * t))) / t
-    where t = 10 ^ n
-
-
-buildFractal :: Generator Double -> QDiagram B V2 Double Any
-buildFractal gen =
-    let genPrefix = showGenerator gen # scale (1 / 3)
-        imgSuffix = arrangeTransforms gen :: Diagram B
-    in vcat [genPrefix, imgSuffix ]
-
-
-defineOutputDomain :: [Word64]
-defineOutputDomain =
-  let begin  = 0 :: Word64
---      stop1  = (2 ^ 6) - 1
-      stop2  = (2 ^ 5) - 1
-      lower  = [ bestMask ]
-      upper  = (`shiftL` 21) <$> [ begin .. stop2 ]
-  in  liftA2 (.|.) upper lower
-
-
-outputFractalTo :: FilePath -> Diagram B -> IO ()
-outputFractalTo path =
-          let dist = 1024
-              spec = dims2D dist dist
-          in  renderSVG path spec
-
-{-
-outputFractalTo :: Bits b => FilePath -> b -> IO ()
-outputFractalTo path i =
-          let dist = 1024
-              draw = buildFractal $ sliceSpikeBy i
-              spec = dims2D dist dist
-          in  renderSVG path spec draw
--}
-
-outputFractal :: (Bits b, PrintfArg b) => b -> IO ()
-outputFractal = outputFractalTo
-    <$> (printf "slice-spike-%09x.svg")
-    <*> (buildFractal . sliceSpikeBy)
-
-
-outputManyFractals :: (Bits b, Foldable f, PrintfArg b) => f b -> IO ()
-outputManyFractals = traverse_ outputFractal
-
-
-{-
-The above is enough to generate a Heighway dragon of arbitrary level of detail, but let's go a little further to show the relation of successive curves in the sequence.
-
-`withPrevious` combines each diagram in a list with a shadow of the previous one.
--}
-
-withPrevious :: (Monoid c, HasStyle c) => Bool -> [c] -> [c]
-withPrevious focusPrev diagrams =
-    let opacities :: (Double, Double)
-        opacities = (1.0, 0.2)
-
-        selection :: (a, a) -> (a, a)
-        selection
-          | focusPrev = id
-          | otherwise = swap
-
-        (prev, curr) = selection opacities
-        diedDiagrams = (diagrams #) . opacity
-    in  zipWith (<>)
-            (diedDiagrams curr)
-            (mempty : diedDiagrams prev)
-
-{-
-We remember the order of the diagrams by giving them names, so that we can lay them out and then show the order with arrows.
--}
-
-rememberOrder :: [Diagram B] -> [Diagram B]
-rememberOrder = zipWith named [0 :: Int ..]
-
-
-showOrder :: Diagram B -> Diagram B
-showOrder diagram =
-    let addArrow :: Int -> QDiagram B V2 Double Any -> QDiagram B V2 Double Any
-        addArrow n = connectOutside' opts n (n + 1)
-
-        opts = with & gaps .~ normalized (0.005 :: Double)
-                    & headLength .~ tiny
-
-    in  diagram # applyAll (map addArrow [ 0 .. length (names diagram) ])
-
-{-
-Finally, we put all of the above together, with some layout tricks to make the diagrams and arrows align properly. `gridSnake` lays out the diagrams in a "snaking" grid, so that each diagram is adjacent to the previous one.
--}
-
-arrangeTransforms :: Generator Double -> QDiagram B V2 Double Any
-arrangeTransforms gen =
-    let generatedFrames :: [Trail' Line V2 Double]
-        generatedFrames = iterGeneratorWithScaling (1 / 4) gen
-
-        renderedDiagram :: TrailLike c => Trail' l (V c) (N c) -> c
-        renderedDiagram = trailLike . (`at` origin) . Trail
-
---        makeHalfOpacity :: HasStyle x => x -> x
---        makeHalfOpacity = (# opacity 0.5)
-
-    in  generatedFrames
-            # map renderedDiagram
-            # withPrevious False
-            # take 4
-            # sameBoundingRect
-            # rememberOrder
-            # map (frame 0.1)
-            # gridSnake
-            # showOrder
-            # lw ultraThin
-
-data  Candidate
-    = Candidate
-    { _candidateIndex  :: ShapeIndex
-    , _candidatePoints :: Set (P2 Double)
-    }
-
-
-instance Show Candidate where
-
-    show (Candidate (ShapeIndex i) ps) =
-        let indent = ("  " <>)
-            prefix = "Index: " <> printf shapeIndexformatStr i
-            suffix = indent <$> case toAscList ps of
-              []    -> pure $ "{ None }"
-              x:[] -> pure $ "{ " <> show x <> " }"
-              x:xs -> pure "{" <> (show <$> x:xs) <> pure "}"
-        in  unlines $ prefix : suffix
-
-
-forgeShuriken :: Generator Double -> QDiagram B V2 Double Any
-forgeShuriken =
-    let makeImage :: Trail V2 Double -> QDiagram B V2 Double Any
-        makeImage = (# lw ultraThin) . trailLike . (`at` origin)
-    in  makeImage . flip shurikenUsing 4
-
-
-paint :: (Bits b, MonadIO m) => SketchState b -> m ()
-paint =
-    let rendering :: Bits i => i -> QDiagram B V2 Double Any
-        rendering i = vcat
-            [ buildFractal  $ sliceSpikeBy i
-            , forgeShuriken $ sliceSpikeBy i
+jobSpecificationForm :: JobInput -> Form JobInput e Name
+jobSpecificationForm =
+    let valueBox = withBorderStyle BS.unicodeBold . hLimit 36
+        label s f w = padBottom (Pad 1) $ (vLimit 1 $ hLimit 7 $ str (s <> ":") <+> fill ' ') <+> f w
+        emailBox = withBorderStyle BS.unicodeBold . hLimit 36
+        edictBox = withBorderStyle BS.unicodeBold . (<+> str "minutes") . padRight (Pad 1) . hLimit 8
+    in  newForm
+            [ label "Email" emailBox @@= editShowableField (jobInputEmail :: Lens' JobInput Email  ) InputField_Mail
+            , label "Edict" edictBox @@= editShowableField (jobInputEdict :: Lens' JobInput Minutes) InputField_Time
+            , label "Level" emailBox @@= radioField         jobInputLevel
+                [ ( Nil, InputField_Nil, "Nil")
+                , ( Low, InputField_Low, "Low")
+                , ( Mid, InputField_Mid, "Mid")
+                , ( Max, InputField_Max, "Max")
+                ]
             ]
-    in  liftIO . outputFractalTo fractalFilePath . rendering . candidate
 
 
-bestMask :: Integral i => i
-
--- arrangement12
---bestMask = 0x100a
-
--- arrangement11
-bestMask = 0x00000000c56c
---0xc149
---bestMask = 0x000000008173
-
--- arrangement10
---bestMask = 0x00c2a8a0020c
---bestMask = 0x00c7acb00208
-
--- arrangement9
---bestMask = 0x0352e7ca0003
-
--- arrangement7
---bestMask = 0x0352e73c9586
---bestMask = 0x0352e72c9586
---bestMask = 0x0352e73d8187
---bestMask = 0x0352e73d9587
-
---bestMask = 0x0352e63c9587
---bestMask = 0x0352e8999555
---bestMask = 0x0352ea699555
---bestMask = 0x0352ea68d555
---bestMask = 0x0352e328c000
---bestMask = 0x0352e3688000
---bestMask = 0x0352e0dcf0c0
---bestMask = 0x000101837
---bestMask = 0x000101C37
---bestMask = 0x000100C37
---bestMask = 0x1e007d610
---bestMask = 0x3c05f9f3365
---bestMask = 0x3c05f981507
---bestMask = 0x3c475f55577
---bestMask = 0x0352e08c2000
---bestMask = 0x0352e08e980a
---bestMask = 0x0352e082900f
---bestMask = 0x0352e081a008
---bestMask = 0x0352e082a500
---bestMask = 0x0352e0df30c0
+drawTUI :: FrontEndTermState e -> [Widget Name]
+drawTUI st =
+    let barTitle = hBox
+            [ drawSTREAM st
+            , drawHelper st
+            ]
+        barInput = hBox
+            [ drawUserInput st
+            , drawFileBrowser st
+            ]
+    in  pure . C.center $ vBox
+            [ barTitle
+            , barInput
+            , drawChoosenFiles st
+            , drawSendButton st
+            ]
 
 
-main :: IO ()
-main =
-    let x = 1
-    in case x of
-       0 -> main0
-       1 -> main1
-       _ -> main2
+drawSTREAM :: FrontEndTermState e -> Widget Name
+drawSTREAM =
+    let boxTitle = drawTitle
+            [ "Simple"
+            , "Transparent"
+            , "Resource"
+            , "Exchange"
+            , "And"
+            , "Management"
+            ]
+
+        drawLine x =
+            let cap = str . pure $ head x
+                sep = padLeftRight 2 $ str "-"
+                end = str x
+            in  hLimit 18 $ cap <+> sep <+> end
+
+        drawTitle = id
+          . joinBorders
+          . withBorderStyle BS.unicodeBold
+          . B.borderWithLabel (str "STREAM User Endpoint")
+          . freezeBorders
+          . hLimit 47
+          . C.hCenter
+          . padTopBottom 2
+          . vBox
+          . fmap drawLine
+
+    in  const boxTitle
 
 
-main0 :: IO ()
-main0 = outputFractalTo fractalFilePath $ forgeShuriken sliceSpikeSeries4
-    -- outputManyFractals $ [ bestMask :: Word64 ]
+drawHelper :: FrontEndTermState e -> Widget Name
+drawHelper st =
+    let
+        boxLine (k,v) = keyBox k <+> valBox v
+
+        keyMax = maximum $ length . fst <$> pairs st
+        keyPad x = x <> replicate (keyMax - length x) ' '
+        keyBox x = padLeftRight 1 . hLimit keyMax . str $ keyPad x
+
+        valMax = maximum $ length . snd <$> pairs st
+        valPad x = x <> replicate (valMax - length x) ' '
+        valBox x = padLeftRight 1 . hLimit valMax . str $ valPad x
+
+        pairs x = fold
+            [ helpInfoConst x
+            , helpInfoMetadata
+            , helpInfoFileData x
+            ]
+
+        helpInfoConst x =
+            [ ("Escape:"     , "Exit")
+            , ("Shift+Enter:", "Send job")
+            ] <> helpInfoDirection x
 
 
-main2 :: IO ()
-main2 =
-  let
-{-
-      intersections :: Located (Trail V2 Double) -> [Point V2 Double]
-      intersections t =
-          let -- ps :: _
-              ps = trailPoints t
-          in  ps
--}
+        helpInfoDirection x =
+            let goFileData = ("Shift+Right:", "Switch to file selector")
+                goMetadata = ("Shift+Left:" , "Switch to job metadata")
+                goSendTask = ("'|':" , "Switch to job submission")
+            in  case x ^. inputFocused of
+                    PaneMetadata -> [ goFileData, goSendTask ]
+                    PaneFileData -> [ goMetadata, goSendTask ]
+                    PaneSendTask -> [ goMetadata, goFileData ]
 
-{-
-      pointsToSVG :: Candidate -> IO ()
-      pointsToSVG =
-         let pntCirc  :: Trail V2 Double -- V2 Double
-             pntCirc  = unitCircle
+        helpInfoMetadata =
+            [ ("Tab:"      , "Next input field")
+            , ("Shift+Tab:", "Previous input field")
+            ]
 
-             pointDot :: Point V2 Double -> QDiagram B V2 Double Any -- P2 Double -> _
-             pointDot = trailLike . at (scale (1 / 72) pntCirc)
+        helpInfoFileData x = helpInfoFileErr x <>
+            [ ("Enter:"  , "select file, change folder")
+            , ("Up/Down:", "scroll" )
+            , ("/:"      , "search, escape to cancel")
+            ]
 
-             pointImg :: [Point V2 Double] -> QDiagram B V2 Double Any -- [P2 Double] -> Diagram B
-             pointImg = foldMap pointDot
+        helpInfoSendData =
+            [ ("Enter:", "submit job for processing")
+            ]
 
-         in  outputFractalTo "slice-spike.svg" . pointImg . toAscList . _candidatePoints
--}
-{-
-      locate =
-          let check = null . _candidatePoints
-          in  getFirst . foldMap (First . Just) . filter check
--}
-      domain :: [Word]
-      domain = [ 0x000000005d4b .. 2 ^ 36 ]
---                    let i = (<> " ") . show . fromEnum $ _candidateIndex c
---                        b =
---                    in  hPutStr stdout i *> hFlush stdout $> b
+        helpInfoFileErr x =
+            case FB.fileBrowserException $ x ^. fileSelector of
+                Nothing -> []
+                Just e  -> [ ("Error:", displayException e) ]
 
+        helpBoxFormat = padTop (Pad 1) . vBox . fmap boxLine
 
-  in  performSearch domain   -- pointsToSVG =<< considerIndex (bestMask :: Word)
+        boxHelp x =
+            let boxConstant = helpBoxFormat $ helpInfoConst x
+                boxContext  = helpBoxFormat $ case x ^. inputFocused of
+                    PaneMetadata -> helpInfoMetadata
+                    PaneFileData -> helpInfoFileData x
+                    PaneSendTask -> helpInfoSendData
+            in  boxConstant <=> boxContext
 
+        boxPadding = padBottom $ case st ^. inputFocused of
+            PaneMetadata -> Pad 2
+            PaneFileData -> Pad 1
+            PaneSendTask -> Pad 3
 
-
-performSearch :: (Bits i, Integral i) => [i] -> IO ()
-performSearch =
-    let ponder :: (Bits i, Integral i) => i -> Arg Int Candidate
-        ponder = (Arg <$> length . _candidatePoints <*> id) . considerIndex
-        update :: (Bits p, Integral p) => IORef (Arg Int Candidate) -> p -> IO ()
-        update ref key =
-            let val@(Arg len _) = ponder key
-            in  writeIORef ref val *> print len
-    in  \case
-            [] -> putStrLn "( None )"
-            x:xs -> do
-                tID <- myThreadId
-                currentMinima <- newIORef $ ponder x
-                let printMin :: IO ()
-                    printMin = readIORef currentMinima >>= print
-
-                let handler :: IO ()
-                    handler = printMin *> killThread tID
-
-                let go :: (Bits i, Integral i) => [i] -> IO ()
-                    go cs = do
-                        minima <- readIORef currentMinima
-                        case dropWhile ((>= minima) . ponder) cs of
-                          [] -> pure ()
-                          m:ms -> update currentMinima m *> go ms
-
-                void $ installHandler keyboardSignal (Catch handler) Nothing
-                putStrLn "Searching ..."
-                update currentMinima x
-                go xs *> printMin
+    in  id
+          . joinBorders
+          . withBorderStyle BS.unicodeBold
+          . B.borderWithLabel (str "Input Controls")
+          . freezeBorders
+          . hLimit 47
+          . C.hCenter
+          . boxPadding
+          $ boxHelp st
 
 
---            traverse_ (print <=< considerIndex) [ bestMask :: Word ]
+drawUserInput :: FrontEndTermState e -> Widget Name
+drawUserInput st =
+    let formBox = id
+            . joinBorders
+            . borderWithLabel (txt "Job Specification")
+            . freezeBorders
+            . padTop (Pad 1)
+            . padLeftRight 2
+            . hLimit 48
+            . renderForm
+            . (^. inputJobForm)
+    in  formBox st
 
 
-considerIndex :: (Bits i, Integral i) => i -> Candidate
-considerIndex =
-    let genTrailT2 :: Bits i => i -> Located (Trail V2 Double)
-        genTrailT2 = (`at` origin) . Trail . (!! 2) . iterGeneratorWithScaling (1 / 4) . sliceSpikeBy
+drawFileBrowser :: FrontEndTermState e -> Widget Name
+drawFileBrowser st =
+    let
+        browser = id
+            . vLimit 12
+            . hLimit 50
+            . borderWithLabel (txt "File Selector")
+            . FB.renderFileBrowser True
+            . (^. fileSelector)
+    in browser st
 
-        intersectionPoints :: Located (Trail V2 Double) -> Set (P2 Double)
-        intersectionPoints = foldMap intersectionCheck . segmentPairings
 
-        --intersectionPoints :: MonadIO m => Located (Trail V2 Double) -> m (Set (P2 Double))
-        --intersectionPoints = fmap fold . zipWithM intersectionCheck [ 0 .. ] . segmentPairings
+drawSendButton :: FrontEndTermState e -> Widget Name
+drawSendButton st =
+    let focusing = case st ^. inputFocused of
+            PaneSendTask -> withAttr readySend
+            _ -> id
 
-        -- trailLocSegments :: Located (Trail v n) -> [Located (Segment Closed v n)]
-        -- fromLocSegments  :: TrailLike t => Located [Segment Closed (V t) (N t)] -> t
+        bordering = case st ^. inputFocused of
+            PaneSendTask -> withBorderStyle BS.unicodeBold
+            _ -> id
 
-        intersectionCheck
-            :: ([Located (Segment Closed V2 Double)], Located (Segment Closed V2 Double))
-            -> (Set (P2 Double))
-        intersectionCheck (prevSegs, currSeg) =
-            let prevTrail = fromLocSegments . (`at` origin) $ unLoc <$> prevSegs
-                currTrail = fromLocSegments $ (:[]) `mapLoc` currSeg
-  --              makeWithOpacity val tr = trailLike tr # opacity val
-  --              outputPath = "slice-spike-" <> show i <> ".svg"
-  --              diagramFig = makeWithOpacity 0.2 prevTrail <> makeWithOpacity 0.6 currTrail
-                --opIO = outputFractalTo outputPath
-            in   --liftIO $ pure diagramFig
-                fromList $ fmap (roundToDigits 5) <$> intersectPointsT prevTrail currTrail
+    in  id
+        . padLeftRight 36
+--        . hCenter
+        . hLimit 32
+        . vLimit 5
+        . bordering
+        . border
+        . freezeBorders
+        . padLeftRight 5
+        . padTopBottom 1
+        . focusing
+        $ str " S U B M I T "
 
-        segmentPairings
-            :: ( Floating n, Ord n )
-            => Located (Trail V2 n)
-            -> [ ( [Located (Segment Closed V2 n)], Located (Segment Closed V2 n) ) ]
-        segmentPairings trail =
-            let go :: ([a] -> [a]) -> NonEmpty a -> [([a], a)]
-                go pref (x1:|xss) = case xss of
-                  []     -> []
-                  x2:xs ->
-                      let next = go (pref [x1] <>) $ x2:|xs
-                          curr = (pref [], x2)
-                      in  curr : next
+drawChoosenFiles :: FrontEndTermState e -> Widget Name
+drawChoosenFiles st =
+    let fileLine (path, disk) =
+            let strDisk = show disk
+                padDisk = padLeft (Pad (8 - length strDisk)) $ str strDisk
+                boxDisk = padLeftRight  1  padDisk
+                boxPath = padRight (Pad 1) $ str path
+            in  vLimit 1 $ boxDisk <+> boxPath
 
-            in  case trailLocSegments trail of
-                  [] -> []
-                  x:xs -> go id $ x:|xs
+        sizing [] = [ hCenter $ str "( None )" ]
+        sizing xs = xs
 
-    in   Candidate
-            <$> (toEnum . fromIntegral)
-            <*> (intersectionPoints . genTrailT2)
--}
+        fileList = id
+--            . hCenter
+            . vLimit 16
+            . hLimit 99
+            . borderWithLabel (txt "Choosen Files")
+            . freezeBorders
+            . padTopBottom 1
+            . vBox
+            . sizing
+            . fmap fileLine
+            . toList
+            . (^. choosenFiles)
+    in fileList st
+
+
+consumeSelectedFiles :: [FileInfo] -> Set (FilePath, Disk)
+consumeSelectedFiles fs =
+    let consumeFile fInfo = case fileStatusSize <$> fileInfoFileStatus fInfo of
+          Left _ -> []
+          Right size -> [(fileInfoFilePath fInfo, fromBytes size)]
+    in  fromList $ foldMap consumeFile fs
+
+
+getMarkedFiles :: EventM Name (FileBrowser Name) (Set (FilePath, Disk))
+getMarkedFiles = consumeSelectedFiles . FB.fileBrowserSelection <$> get
+
+
+sendJobRequest :: Manager -> Gateway -> JobInput -> Set (FilePath, Disk) -> IO ()
+sendJobRequest manager gateway input files =
+    let requestObject = toJSON $ buildJobSpecification files input
+        request connection = connection
+            { method = "POST"
+            , requestBody = RequestBodyLBS $ encode requestObject
+            }
+        handler :: Response BodyReader -> IO ()
+        handler response =
+            putStrLn $ "The status code was: " <> (show $ statusCode $ responseStatus response)
+
+    in  do  initialRequest <- parseRequest $ show gateway
+            traceToFile "Gateway" $ show gateway
+            traceToFile "JSON object to send" . BS.unpack . encodePretty $ toJSON $ buildJobSpecification files input
+--            print . BS.unpack . encodePretty . toJSON $ buildJobSpecification files input
+--            print (request initialRequest)
+            withResponse (request initialRequest) manager handler
+
+
+logFileHandle :: IORef Handle
+logFileHandle = unsafePerformIO $ openFile "brick.log" WriteMode >>= newIORef
+
+
+traceToFile :: (MonadIO m) => String -> String -> m ()
+traceToFile key val =
+    let writeOut :: Handle -> IO ()
+        writeOut h = hPutStrLn h (key <> ":\t" <> val) *> hFlush h
+
+        logKeyValPair :: IO ()
+        logKeyValPair = readIORef logFileHandle >>= writeOut
+
+    in  liftIO logKeyValPair

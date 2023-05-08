@@ -46,8 +46,8 @@ Furthermore, the service will be implemented in a distributed manner, permitting
 We will use GENI to simulate multiple collaborating scientific institutions.
 Each scientific organization will form a \KeyWord{Domain}.
 A \KeyWord{Domain} is a network topology of resources contained entirely within a ``real'' GENI site.
-Multiple \KeyWord{Domain} will be connected together within GENI to form a multi-could topology.
-Every \ \KeyWord{Domain} has an \KeyWord{Endpoint} facilitating \KeyWord{User} access to the entire multi-could topology which comprises the Science Broker Service.
+Multiple \KeyWord{Domain} will be connected together within GENI to form a multi-cloud topology.
+Every \ \KeyWord{Domain} has an \KeyWord{Endpoint} facilitating \KeyWord{User} access to the entire multi-cloud topology which comprises the Science Broker Service.
 A \KeyWord{User} can submit a \KeyWord{Job} through an \KeyWord{Endpoint} by specifying the required resources.
 
 Furthermore there will be an additional \KeyWord{Domain} containing containing the \KeyWord{Broker}.
@@ -74,8 +74,6 @@ Additionally, the \KeyWord{Broker} executes a scheduling algorithm to determine 
 \end{figure}
 
 
-
-
 \subsection{Scheduling \& Queuing}
 
 Testing possible scheduling algorithms that are:
@@ -90,10 +88,16 @@ Because we focus on monitoring our brokering network's resource management and p
 
 \subsection{Domains}
 
-Within the multi-could topology, there are many \KeyWord{Domain}s.
-Each \KeyWord{Domain} contributes one or more computing resources to the multi-could topology.
+Within the multi-cloud topology, there are many \KeyWord{Domain}s.
+Each \KeyWord{Domain} contributes one or more computing resources to the multi-cloud topology.
 Additionally, each \KeyWord{Domain} locally hosts an \KeyWord{Endpoint} from which a \KeyWord{User} within the \KeyWord{Domain} can access the computing resources of the science brokering service by submitting a \KeyWord{Job}.
 Networked communication and computations across domains are dynamically mediated by the \KeyWord{Broker}.
+
+
+\subsection{Replication}
+
+We will use Docker containers and Kubernetes to manage workload distribution, backup, and migration.
+This will make it easier for us to manage and scale the science brokering service.
 
 
 \subsection{Jobs}
