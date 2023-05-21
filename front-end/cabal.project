@@ -1,0 +1,81 @@
+---------------------------------------------------------------------------------
+-- Build metadata flags
+--
+-- Sensible alterations from the defaults to improve the build experience during
+-- iterative development. Simultaneously, does not hinder release builds.
+---------------------------------------------------------------------------------
+
+documentation: False
+executable-static: False
+install-method: copy
+jobs: $ncpus
+minimize-conflict-set: True
+overwrite-policy: always
+packages: .
+with-compiler: ghc-9.4.5
+
+
+---------------------------------------------------------------------------------
+-- Dependency specifications
+--
+-- Always allow a newer version of libraries which are tightly coupled to the GHC
+-- compiler version. This allows the project to build with newer versions of the
+-- compiler without having to tediously tinker with dependencies, both direct and
+-- transitive.
+--
+-- Furthermore, always allow a newer version of libraries which have had a major
+-- release due to a security or performance patch. Add a preference for using a
+-- version greater than or equal to the patch.
+---------------------------------------------------------------------------------
+
+allow-newer:
+    -- Core library
+    base,
+    ghc,
+    ghc-compact,
+    ghc-prim,
+    integer-gmp,
+    template-haskell,
+    -- Internal compiler library
+    ghc-boot,
+    ghc-boot-th,
+    ghc-heap,
+    libiserv,
+    -- Dependency of `ghc` library
+    array,
+    binary,
+    bytestring,
+    containers,
+    deepseq,
+    directory,
+    exceptions,
+    filepath,
+    pretty,
+    process,
+    time,
+    transformers,
+    unix,
+    Win32,
+    -- Core tool library
+    ghci,
+    hpc,
+    Cabal,
+    -- Dependency of `Cabal` library
+    mtl,
+    parsec,
+    text,
+    -- Security update
+    aeson,
+    -- Lagging project dependency
+    memory,
+    -- Improved library
+    pandoc,
+
+constraints:
+    pandoc +embed_data_files
+
+preferences:
+    aeson          >= 2.0.0,
+    bytestring     >= 0.11.3,
+    pandoc         >= 3.1,
+    text           >= 2.0,

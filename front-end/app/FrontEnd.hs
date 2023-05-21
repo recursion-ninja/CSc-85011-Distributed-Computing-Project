@@ -1,145 +1,66 @@
-{-# Language DerivingStrategies #-}
+{-# Language DataKinds #-}
 {-# Language FlexibleContexts #-}
 {-# Language ImportQualifiedPost #-}
 {-# Language LambdaCase #-}
 {-# Language OverloadedStrings #-}
-{-# Language StandaloneDeriving #-}
-{-# Language StrictData #-}
-{-# Language TemplateHaskell #-}
 
 module Main
   ( main
   ) where
 
 import Brick hiding (Direction, Max)
+import Brick.BChan
 import Brick.Forms
 import Brick.Widgets.Border
 import Brick.Widgets.Border qualified as B
-import Brick.Widgets.Border.Style qualified as BS
+import Brick.Widgets.Border.Style (unicodeBold)
 import Brick.Widgets.Center (hCenter)
 import Brick.Widgets.Center qualified as C
 import Brick.Widgets.Edit qualified as E
 import Brick.Widgets.FileBrowser
 import Brick.Widgets.FileBrowser qualified as FB
-import Broker.CommandLineOptions
+import Brick.Widgets.ProgressBar
+import Broker.Gateway
+import Broker.Job.Allocation
 import Broker.Job.Input
+import Broker.Job.Poll
 import Broker.Job.Specification
-import Control.Exception (displayException)
+import Client.CommandLineOptions
+import Client.FileStore
+import Control.Concurrent
+import Control.Exception (bracket, displayException, throwIO)
+import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.Aeson (encode)
+import Data.Aeson.Encoding (encodingToLazyByteString)
 import Data.Aeson.Types
-import Data.Aeson.Encode.Pretty (encodePretty)
-import Data.ByteString.Lazy.Char8 qualified as BS
-import Data.Foldable (fold, toList)
-import Data.Functor
-import Data.Set (Set)
+import Data.Bifunctor
+import Data.ByteString.Char8 qualified as BS
+import Data.ByteString.Lazy.Char8 qualified as BSL
+import Data.Foldable (fold, toList, traverse_)
+import Data.Functor (($>), void)
+import Data.List (intersperse)
 import Data.IORef
-import Data.Text (Text, pack, unpack)
-import Data.Vector (Vector)
+import FrontEnd.Core
+import FrontEnd.Types
 import GHC.Exts (fromList)
 import Graphics.Vty (Event(..), Key(..), Modifier(..))
 import Graphics.Vty qualified as V
-import Lens.Micro (Lens', (^.), (.~), (%~))
-import Network.HTTP.Client
+import Graphics.Vty.Attributes.Color
+import Lens.Micro ((^.), (.~), (%~), _Left, _Right)
+import Network.HTTP.Client hiding (responseBody)
+import Network.HTTP.Client qualified as HTTP
+import Network.HTTP.Client.MultipartFormData
 import Network.HTTP.Types.Status
+import Network.HTTP.Req
+import System.FilePath
 import System.IO
 import System.IO.Unsafe
-
-
--- | Named resources
---
--- Not currently used, but will be easier to refactor
--- if we call this "Name" now.
---type Name = ()
-data  Name
-    = InputField_Mail
-    | InputField_Time
-    | InputField_Nil
-    | InputField_Low
-    | InputField_Mid
-    | InputField_Max
-    | InputField_List
-    | Browser_FileSystem
-    deriving (Eq, Ord, Show)
-
-
-data  FocusedPane
-    = PaneMetadata
-    | PaneFileData
-    | PaneSendTask
-
-
-deriving stock instance Eq FocusedPane
-
-
-deriving stock instance Ord FocusedPane
-
-
-deriving stock instance Show FocusedPane
-
-
-data  FrontEndTermState e
-    = FrontEndTermState
-    { _inputFocused :: FocusedPane
-    , _inputJobForm :: Form JobInput e Name
-    , _fileSelector :: FileBrowser Name
-    , _choosenFiles :: Set (FilePath, Disk)
-    , _managerHTTPS :: Manager
-    , _givenArgsCLI :: CommandLineOptions
-    }
-
-
-{-# INLINE inputFocused #-}
-inputFocused :: forall a. Lens' (FrontEndTermState a) FocusedPane
-inputFocused f st = (\v -> st { _inputFocused = v }) <$> f (_inputFocused st)
-
-
-{-# INLINE inputJobForm #-}
-inputJobForm :: forall a. Lens'
-    (FrontEndTermState a)
-    (Form JobInput a Name)
-inputJobForm f st = (\v -> st { _inputJobForm = v }) <$> f (_inputJobForm st)
-
-
-{-# INLINE fileSelector #-}
-fileSelector :: forall a. Lens'
-    (FrontEndTermState a)
-    (FileBrowser Name)
-fileSelector f st = (\v -> st { _fileSelector = v }) <$> f (_fileSelector st)
-
-
-{-# INLINE choosenFiles #-}
-choosenFiles :: forall a. Lens'
-    (FrontEndTermState a)
-    (Set (FilePath, Disk))
-choosenFiles f st = (\v -> st { _choosenFiles = v }) <$> f (_choosenFiles st)
-
-
-{-# INLINE managerHTTPS #-}
-managerHTTPS :: forall a. Lens' (FrontEndTermState a) Manager
-managerHTTPS f st = (\v -> st { _managerHTTPS = v }) <$> f (_managerHTTPS st)
-
-
-{-# INLINE givenArgsCLI #-}
-givenArgsCLI :: forall a. Lens' (FrontEndTermState a) CommandLineOptions
-givenArgsCLI f st = (\v -> st { _givenArgsCLI = v }) <$> f (_givenArgsCLI st)
+import Text.Read (readMaybe)
 
 
 main :: IO ()
 main =
-    let initializeState :: CommandLineOptions -> Manager -> IO (FrontEndTermState e)
-        initializeState opts netMan = newFileBrowser selectNonDirectories Browser_FileSystem Nothing >>=
-            \browser ->
-                pure FrontEndTermState
-                { _inputFocused = PaneMetadata
-                , _inputJobForm = jobSpecificationForm blankJobInput
-                , _fileSelector = browser
-                , _choosenFiles = mempty
-                , _managerHTTPS = netMan
-                , _givenArgsCLI = opts
-                }
-
-        frontendApp :: App (FrontEndTermState e) e Name
+    let frontendApp :: App (FrontEndState) MyEvent Name
         frontendApp = App
             { appAttrMap      = const theMap
             , appChooseCursor = showFirstCursor
@@ -150,104 +71,618 @@ main =
 
         builder = V.mkVty V.defaultConfig
 
-    in  do  optionsCLI <- getCommandLineOptions
-            netManager <- newManager defaultManagerSettings
+    in  do  tickStream <- initializeTicks
+            initState  <- initializeFrontEndState tickStream
             initialVty <- builder
-            initState  <- initializeState optionsCLI netManager
-            void $ customMain initialVty builder Nothing frontendApp initState
+            void $ customMain initialVty builder (Just tickStream) frontendApp initState
 
 
-handleEvent :: BrickEvent Name e -> EventM Name (FrontEndTermState e) ()
-handleEvent bEvent = do
-    pane <- gets (^. inputFocused)
+handleEvent :: BrickEvent Name MyEvent -> EventM Name (FrontEndState) ()
+handleEvent = \case
+    -- Immediately handle terminal control events
+    VtyEvent (EvResize  {}) -> pure ()
+    VtyEvent (EvKey KEsc []) -> halt
 
-    case bEvent of
-        VtyEvent (EvResize    {}) -> return ()
-        VtyEvent (EvKey KEsc   []) -> halt
-        VtyEvent (EvKey (KChar '|') _)   -> modify $ (inputFocused .~ PaneSendTask)
-        VtyEvent (EvKey KLeft  [MShift]) -> modify $ (inputFocused .~ PaneMetadata)
-        VtyEvent (EvKey KRight [MShift]) -> modify $ (inputFocused .~ PaneFileData)
+    -- Next check which mode we are in
+    bEvent -> zoom whichMode $ do
+        sent <- zoom _Left $ handleInputing bEvent
+        case sent of
+            Just files -> transitionFrontEndState files
+            Nothing    -> pure ()
+
+        zoom _Right $ handleQueueing bEvent
+
+
+sendJobRequest :: Gateway -> JobInput -> FileStore Disk -> IO JobAllocation
+sendJobRequest gateway input files =
+    let (reqURL, reqOpt) = gatewayEndpoint gateway
+
+        fjNames = first tayloredName <$> fileStoreList files
+        jobSpec = buildJobSpecification fjNames input
+        jobJSON = BSL.toStrict . encodingToLazyByteString $ toEncoding jobSpec
+        optJSON = header "Content-Type" "application/json; charset=utf-8"
+        request = req POST (reqURL /: "jobs") (ReqBodyBs jobJSON) jsonResponse (reqOpt <> optJSON)
+
+        response :: IO JobAllocation
+        response = responseBody <$> runReq defaultHttpConfig request
+
+    in  do  result <- response
+            traceToFile "Input File List" $ show fjNames
+            pure result
+
+
+handleInputing :: BrickEvent Name MyEvent -> EventM Name FrontEndStateInputing (Maybe (FileStore FileReference))
+handleInputing = \case
+    AppEvent (Left tick) -> liftIO (traceToFile "AppEvent" $ show tick) *> modify (currentTick .~ tick) $> Nothing
+    VtyEvent (EvKey (KChar '|') _)   -> modify (inputFocused .~ PaneSendTask) $> Nothing
+    VtyEvent (EvKey KLeft  [MShift]) -> modify (inputFocused .~ PaneMetadata) $> Nothing
+    VtyEvent (EvKey KRight [MShift]) -> modify (inputFocused .~ PaneFileData) $> Nothing
+
+    bEvent -> gets (^. inputFocused) >>= \case
+        PaneMetadata -> Nothing <$ zoom inputJobForm (handleFormEvent bEvent)
+
+        PaneFileData -> (Nothing <$) $ do
+            workDir <- gets (^. workingDirectory)
+            markedFiles <- zoom fileSelector $ do
+                case bEvent of
+                    VtyEvent event -> do
+                        handleFileBrowserEvent event
+                        case event of
+                            V.EvKey V.KEnter [] -> getMarkedFiles workDir 
+                            _ -> pure mempty
+                    _ -> pure mempty
+
+            when (markedFiles /= mempty) $ 
+                modify (fileStore %~ (<> markedFiles))
+
+        PaneSendTask -> case bEvent of
+            VtyEvent (EvKey KEnter _) -> do
+                servr <- gets (gateway . (^. givenArgs))
+                files <- gets (^. fileStore)
+                input <- gets (formState . (^. inputJobForm))
+                alloc <- liftIO $ sendJobRequest servr input files
+                liftIO . traceToFile "Results" . show $ getFileUploadSet alloc
+                let newStore = internalizeAllocation files alloc
+                liftIO . traceToFile "New F-Store" $ show newStore
+                pure $ Just newStore
+
+            _ -> pure Nothing
+
+
+handleQueueing :: BrickEvent Name MyEvent -> EventM Name FrontEndStateQueueing ()
+handleQueueing = \case
+    AppEvent (Left tick) -> do
+        liftIO (traceToFile "AppEvent" $ show tick) *> modify (currentTick .~ tick)
+
+        liftIO $ traceToFile "Queueing:" "ENTRY"
+        handleFileUploads
+        liftIO $ traceToFile "Queueing:" "UPLOADED"
+        liftIO $ traceToFile "Queueing:" "POLLING?"
+        handleFilePolling
+        liftIO $ traceToFile "Queueing:" "POLLED!"
+
+        liftIO $ traceToFile "Queueing:" "Downloads"
+        handleFileDownloads
+        liftIO $ traceToFile "Queueing:" "Downloaded!"
+
+        modify $ currentTick .~ tick
+        fs <- gets (^. fileStore)
+        liftIO $ traceToFile "FILE Store" $ show fs
+
+    AppEvent (Right (path, updater)) -> do
+        modify $ fileStore %~ (path `fileAdjustBy` updater)
+
+    _ -> do liftIO $ traceToFile "Queueing:" "ENTRY"
+            handleFileUploads
+            liftIO $ traceToFile "Queueing:" "UPLOADED"
+
+
+refreshUploadFile :: FileDataProgress -> FileReference -> FileReference
+refreshUploadFile      (Fail {})  = id
+refreshUploadFile part@(Part {})  = fileUploadTo part
+refreshUploadFile      (Done num) = filePollWith num
+
+
+handleFileUploads :: EventM Name FrontEndStateQueueing ()
+handleFileUploads =
+    let blankFileDataSize = Part 0 0
+
+        uploadOneFile channel (FileQuery path (_size, opt, url)) = do
+            let filePath = originalPath path
+            let fileName = tayloredName path
+            liftIO $ traceToFile "File-path" filePath
+            liftIO $ traceToFile "File-name" fileName
+
+            let listener response = do
+                    chunks <- brReadSome (HTTP.responseBody response) 12
+                    let  resStr = BSL.unpack chunks
+                    case readMaybe resStr of
+                        Nothing -> throwIO . JsonHttpException $ "Not a number: " <> show resStr
+                        Just v  -> liftIO . void . writeBChanNonBlocking channel $ Right (path, refreshUploadFile $ Done v)
+
+            let handler request manager = liftIO $ withResponse request manager listener
+
+            let fileProgress :: StreamFileStatus -> IO ()
+                fileProgress (StreamFileStatus d n _) =
+                    let n' = fromIntegral n
+                        d' = fromIntegral d
+                        v  = Part n' d'
+                    in  void . writeBChanNonBlocking channel $ Right (path, refreshUploadFile v)
+
+            filePart <- liftIO $ do
+                            p <- partFileRequestBody "file" fileName <$> observedStreamFile fileProgress filePath
+                            traceToFile "Part File-name" . show $ partFilename p
+                            pure p
+                            
+            reqBody  <- reqBodyMultipart [ filePart ]
+
+            let request = req' POST url reqBody opt handler
+
+            modify $ fileStore %~ (path `fileAdjustBy` refreshUploadFile blankFileDataSize)
+            liftIO . forkIO $ runReq defaultHttpConfig request
+
+    in  do  fStore  <- gets (^. fileStore)
+            channel <- gets (^. eventChannel)
+            liftIO . traceToFile "BEGIN UPLOAD FILE Store" . show $ getQueriedFile <$> toList (queryUploadReady fStore)
+            traverse_ (uploadOneFile channel) $ queryUploadReady fStore
+
+
+handleFilePolling :: EventM Name FrontEndStateQueueing ()
+handleFilePolling =
+    let -- pollOneFile :: FileQuery (Option 'Http, Url 'Http) ->
+        pollOneFile channel (FileQuery path (_, opt, url)) =
+            let request = req GET url NoReqBody bsResponse opt
+
+                response :: IO JobPolledStatus
+                response = do
+                    resStr <- BS.unpack . responseBody <$> runReq defaultHttpConfig request
+                    case readMaybe resStr of
+                       Just v  -> pure v
+                       Nothing -> throwIO . JsonHttpException $ "Not a valid status: " <> show resStr
+
+                handleStatus :: JobPolledStatus -> IO ()
+                handleStatus =
+                    let writeChannel = void . writeBChanNonBlocking channel
+                    in  \case
+                            Waiting    -> pure ()
+                            Processing -> writeChannel $ Right (path, fileNowGoing)
+                            Finished   -> writeChannel $ Right (path, fileNowReady)
+
+
+            in  liftIO . forkIO $ (response >>= (\s -> traceToFile ("Polled - " <> readableName path) (show s) *> handleStatus s))
+
+    in  do  fStore  <- gets (^. fileStore)
+            channel <- gets (^. eventChannel)
+            let pollThese = toList $ queryPolling fStore
+            liftIO . traceToFile "BEGIN UPLOAD FILE Store" . show $ getQueriedFile <$> pollThese
+            traverse_ (pollOneFile channel) pollThese
+
+
+httpFailure :: Status -> FileDataProgress
+httpFailure = (Fail <$> statusCode <*> BS.unpack . statusMessage)
+
+
+handleFileDownloads :: EventM Name FrontEndStateQueueing ()
+handleFileDownloads =
+    let downloadOneFile channel (FileQuery jobFile (opt, url)) = do
+            let filePath   = originalPath jobFile
+            let outputPath = (`addExtension` "mp3") . fst $ splitExtension filePath
+            liftIO $ traceToFile "Filename"   filePath
+            liftIO $ traceToFile "File out" outputPath
+
+            let listener response = do
+                    traceToFile "Listener -- ENTRY" ""
+                    let writeChannel = void . writeBChanNonBlocking channel
+
+                    let resStatus = responseStatus response
+                    if  resStatus /= ok200
+                    then writeChannel $ Right (jobFile, fileFailWith $ httpFailure resStatus)
+                    else do
+
+                        traceToFile "Listener -- Header" "(pre)"
+                        let resHeads = responseHeaders response
+                        let resMay = responseHeader (void response) "Content-Length"
+                        traceToFile "Listener -- Header" . show $ BS.unpack <$> resMay
+                        traceToFile "Listener -- Header (all)\n" . unlines $ show . bimap show BS.unpack <$> resHeads
+                        traceToFile "Listener -- Header" "(post)"
 {-
-        -- Enter quits only when we aren't in the multi-line editor.
-        VtyEvent (V.EvKey V.KEnter [])
-            | focusGetCurrent f /= Just AddressField -> halt
-
-        VtyEvent (EvKey (V.KChar '\t') [])
-            | curr == final -> pure () -- TODO go to FileSelector
+                    let -- brConsume' :: BodyReader -> IO [BS.ByteString]
+                        brConsume' br =
+                            let go front = do
+                                    x <- brRead br
+                                    if   BS.null x
+                                    then pure $ front []
+                                    else go (front . (x:))
+                            in  go id
 -}
-        _ -> case pane of
-            PaneMetadata -> zoom inputJobForm $ do
-                handleFormEvent bEvent
+                        let bodyReader  = HTTP.responseBody response
+                        let acquireFile = outputPath`openFile` ReadWriteMode
+                        let releaseFile = hClose
 
-            PaneFileData -> do
-                markedFiles <- zoom fileSelector $ do
-                    case bEvent of
-                        VtyEvent event -> do
-                            handleFileBrowserEvent event
-                            case event of
-                                V.EvKey V.KEnter [] -> getMarkedFiles
-                                _ -> pure mempty
-                modify (choosenFiles %~ (<> markedFiles))
+                        bracket acquireFile releaseFile $ \outputHandle -> do
+                                traceToFile "Bracket -- ENTRY" outputPath
+{-
+                                let writeOutBytes = do
+                                        traceToFile "Bracket -- Bytes" "Read"
+                                        bs <- brRead bodyReader
+                                        let len = BS.length bs
+                                        if  len == 0
+                                        then traceToFile "Bracket -- Bytes" "EMPTY!" *> pure False
+                                        else do
+                                            traceToFile "Bracket -- Bytes" "Write"
+                                            BS.hPut outputHandle bs
+                                            writeChannel $ Right (path, fileAddBytes $ incrementDataProgress len)
+                                            pure True
+-}
+                                let writeOutChunk bs = do
+                                        let len = BS.length bs
+                                        traceToFile "Bracket -- Chunk" $ "Write -- " <> show len
+                                        BS.hPut outputHandle bs
+                                        writeChannel $ Right (jobFile, fileAddBytes $ incrementDataProgress len)
 
-            PaneSendTask -> case bEvent of
-                VtyEvent (EvKey KEnter _) -> do
-                    liftIO $ putStrLn "ENTERED"
-                    mangr <- gets (^. managerHTTPS)
-                    servr <- gets (gateway . (^. givenArgsCLI))
-                    files <- gets (^. choosenFiles)
-                    input <- gets (formState . (^. inputJobForm))
-                    liftIO $ sendJobRequest mangr servr input files
-                _ -> pure ()
+                                traceToFile "Bracket -- B-Channel" "write (pre)"
+                                writeChannel $ Right (jobFile, fileDownload $ Part 0 0)
+                                traceToFile "Bracket -- B-Channel" "write (post)"
+--                                traceToFile "Bracket -- While-loop" "writeOutBytes (pre)"
+--                                whileM_ writeOutBytes $ pure ()
+--                                traceToFile "Bracket -- While-loop" "writeOutBytes (post)"
+--                                chunks <- brConsume' (HTTP.responseBody response)
+                                chunks <- brConsume bodyReader
+                                traverse_ writeOutChunk chunks
+                                writeChannel $ Right (jobFile, fileComplete)
+
+            let handler request manager = liftIO $ withResponse request manager listener
+
+            let request = req' GET url NoReqBody opt handler
+
+            liftIO . void . forkIO $ runReq defaultHttpConfig request
+
+    in  do  fStore  <- gets (^. fileStore)
+            channel <- gets (^. eventChannel)
+            let downloadables = toList (queryDownloadReady fStore)
+            liftIO . traceToFile "BEGIN DOWNload F-Store" . show $ getQueriedFile <$> downloadables
+            liftIO $ traverse_ (downloadOneFile channel) downloadables
 
 
 -- Drawing
 
 theMap :: AttrMap
 theMap = attrMap V.defAttr
-    [ ( E.editFocusedAttr   , V.black `on` V.yellow )
-    , ( invalidFormInputAttr, V.white `on` V.red    )
-    , ( focusedFormInputAttr, V.black `on` V.yellow )
-    , ( readySend           , V.blue  `on` V.green )
+    [ ( E.editFocusedAttr     , V.black `on` V.yellow )
+    , ( invalidFormInputAttr  , V.white `on` V.red    )
+    , ( focusedFormInputAttr  , V.black `on` V.yellow )
+    , ( readySubmit           , V.blue  `on` V.green  )
+    , ( progressIncompleteAttr,          fg  uploadedBackground )
+    , ( progressCompleteAttr  , V.black `on` uploadedBackground )
+    , ( statusSEND            , V.black `on` uploadedBackground )
+    , ( statusWAIT            , V.black `on` linearColor 150 225 210 )
+    , ( statusWORK            , V.black `on` linearColor 160 230 215 )
+    , ( statusDOWN            , V.black `on` linearColor 170 235 220 )
+    , ( statusDONE            , V.black `on` linearColor 180 240 225 )
+    , ( statusFAIL            , V.black `on` V.red )
     ]
+
+
+statusSEND, statusWAIT, statusWORK, statusDOWN, statusDONE, statusFAIL :: AttrName
+statusSEND = attrName "statusSEND"
+statusWAIT = attrName "statusWAIT"
+statusWORK = attrName "statusWORK"
+statusDOWN = attrName "statusDOWN"
+statusDONE = attrName "statusDONE"
+statusFAIL = attrName "statusFAIL"
+
+
+queuedStatusTinting :: FileQueuedStatus -> Widget n -> Widget n
+queuedStatusTinting = \case
+    SEND -> withAttr statusSEND
+    WAIT -> withAttr statusWAIT
+    WORK -> withAttr statusWORK
+    DOWN -> withAttr statusDOWN
+    DONE -> withAttr statusDONE
+    FAIL -> withAttr statusFAIL
+
+
+uploadedBackground :: Color
+uploadedBackground = linearColor 150 210 225
 
 
 errorAttr :: AttrName
 errorAttr = attrName "error"
 
 
-readySend :: AttrName
-readySend = attrName "readySend"
+readySubmit :: AttrName
+readySubmit = attrName "readySubmit"
 
 
+progressPollingAttr :: AttrName
+progressPollingAttr = attrName "progressPolling"
+
+
+progressDownloadAttr :: AttrName
+progressDownloadAttr = attrName "progressDownloading"
+
+
+{-
 jobSpecificationForm :: JobInput -> Form JobInput e Name
 jobSpecificationForm =
-    let valueBox = withBorderStyle BS.unicodeBold . hLimit 36
+    let valueBox = withBorderStyle unicodeBold . hLimit 36
         label s f w = padBottom (Pad 1) $ (vLimit 1 $ hLimit 7 $ str (s <> ":") <+> fill ' ') <+> f w
-        emailBox = withBorderStyle BS.unicodeBold . hLimit 36
-        edictBox = withBorderStyle BS.unicodeBold . (<+> str "minutes") . padRight (Pad 1) . hLimit 8
+        emailBox = withBorderStyle unicodeBold . hLimit 36
+        edictBox = withBorderStyle unicodeBold . (<+> str "minutes") . padRight (Pad 1) . hLimit 8
     in  newForm
             [ label "Email" emailBox @@= editShowableField (jobInputEmail :: Lens' JobInput Email  ) InputField_Mail
             , label "Edict" edictBox @@= editShowableField (jobInputEdict :: Lens' JobInput Minutes) InputField_Time
             , label "Level" emailBox @@= radioField         jobInputLevel
-                [ ( Nil, InputField_Nil, "Nil")
-                , ( Low, InputField_Low, "Low")
-                , ( Mid, InputField_Mid, "Mid")
+                [ ( Low, InputField_Low, "Low")
+                , ( Mid, InputField_Mid, "Med")
                 , ( Max, InputField_Max, "Max")
                 ]
             ]
+-}
 
 
-drawTUI :: FrontEndTermState e -> [Widget Name]
-drawTUI st =
+drawTUI :: FrontEndState-> [Widget Name]
+drawTUI (FrontEndState st) = case st of
+    Left  inputing -> drawInputingTUI inputing
+    Right queueing -> drawQueueingTUI queueing
+
+
+consumeSelectedFiles :: FilePath -> [FileInfo] -> FileStore Disk
+consumeSelectedFiles workDir fs =
+    let makeJobFile = fromFullPath workDir . fileInfoFilePath
+        consumeFile fInfo = case fileStatusSize <$> fileInfoFileStatus fInfo of
+          Left _ -> []
+          Right size -> [ (makeJobFile fInfo, fromBytes size) ]
+    in  fromList $ foldMap consumeFile fs
+
+
+getMarkedFiles :: FilePath -> EventM Name (FileBrowser Name) (FileStore Disk)
+getMarkedFiles workDir = consumeSelectedFiles workDir . FB.fileBrowserSelection <$> get
+
+
+{-
+downloadFiles
+  :: ( MonadIO m
+     , Traversable f
+     )
+  => f (Arg FilePath (Option Http, Url Http))
+  -> m (f FilePath)
+downloadFiles =
+    let downloadOneFile :: Arg FilePath (Option Http, Url Http) -> IO FilePath
+        downloadOneFile (Arg path (opt, url)) =
+            let target  = path <> ".mp3"
+                request = req GET url NoReqBody lbsResponse opt
+            in  (runReq defaultHttpConfig request >>= BSL.writeFile target . responseBody) $> path
+    in  liftIO . traverse downloadOneFile
+-}
+-- pollJobStatus ::
+
+
+{-
+sendJobRequest :: Manager -> Gateway -> JobInput -> FileStore Disk -> IO ()
+sendJobRequest manager gateway input files =
+    let requestObject = toJSON $ buildJobSpecification files input
+        request connection = connection
+            { method = "POST"
+            , requestBody = RequestBodyLBS $ encode requestObject
+            }
+        handler :: Response BodyReader -> IO ()
+        handler response =
+            putStrLn $ "The status code was: " <> (show $ statusCode $ responseStatus response)
+
+    in  do  initialRequest <- parseRequest $ show gateway
+            traceToFile "Gateway" $ show gateway
+            traceToFile "JSON object to send" . BSL.unpack . encodePretty $ toJSON $ buildJobSpecification files input
+--            print . BS.unpack . encodePretty . toJSON $ buildJobSpecification files input
+--            print (request initialRequest)
+            withResponse (request initialRequest) manager handler
+-}
+
+
+logFileHandle :: IORef Handle
+logFileHandle = unsafePerformIO $ openFile "brick.log" WriteMode >>= newIORef
+
+
+traceToFile :: MonadIO m => String -> String -> m ()
+traceToFile key val =
+    let writeOut :: Handle -> IO ()
+        writeOut h = hPutStrLn h (key <> ":\t" <> val) *> hFlush h
+
+        logKeyValPair :: IO ()
+        logKeyValPair = readIORef logFileHandle >>= writeOut
+
+    in  liftIO logKeyValPair
+
+
+internalizeAllocation :: FileStore Disk -> JobAllocation -> FileStore FileReference
+internalizeAllocation oldStore =
+    let processFile (fileName, host) = case oldStore `fileStoreQuery` fileName of
+            Nothing -> mempty
+            Just (FileQuery jobFile size) ->
+                jobFile `fileStoredWith` fileHostedBy host size
+    in  foldMap processFile . getFileUploadSet
+
+
+encaseFileRow :: Widget n -> Widget n
+encaseFileRow =  vLimit 1 . hLimit 64 . padLeftRight 1
+
+
+drawQueueingTUI :: FrontEndStateQueueing -> [Widget Name]
+drawQueueingTUI st =
+    let upload   :: [ FileQuery (Disk, FileDataProgress) ]
+        upload   = queryBy st queryUploading
+
+        polling  :: [ FileQuery (Bool, Option 'Http, Url 'Http) ]
+        polling  = queryBy st queryPolling
+
+        download :: [ FileQuery FileDataProgress ]
+        download = queryBy st queryDownloading
+
+        complete :: [ FileQuery () ]
+        complete = queryBy st queryComplete
+
+        drawFileUpload :: FileQuery (Disk, FileDataProgress) -> Widget n
+        drawFileUpload (FileQuery jobFile (_, dataRatio)) =
+            let (note, tinting, percentage) = case dataRatio of
+                    Done _   -> (WAIT, withAttr progressCompleteAttr  , 1)
+                    Fail _ _ -> (FAIL, withAttr progressIncompleteAttr, 1)
+                    Part n d -> (SEND, withAttr progressIncompleteAttr, fromIntegral n / fromIntegral d)
+            in  drawQueuedStatusBox note
+              . encaseFileRow
+              . tinting
+              $ progressBar (Just $ readableName jobFile) percentage
+
+        drawFilePolling :: FileQuery (Bool, a, b) -> Widget n
+        drawFilePolling (FileQuery jobFile (working, _, _)) =
+            let note | working   = WORK
+                     | otherwise = WAIT
+                tinting = withAttr progressPollingAttr
+            in  drawQueuedStatusBox note . encaseFileRow . tinting $ jobFileWidget jobFile []
+
+        drawFileDownload :: FileQuery FileDataProgress -> Widget n
+        drawFileDownload (FileQuery jobFile dataRatio) =
+            let tinting = withAttr progressDownloadAttr
+                (note, suffix) = case dataRatio of
+                  Done _        -> (DONE, [])
+                  Part bytes  _ -> (DOWN, [ "--", show (fromBytes bytes) `leftSpacedTo` 8 ])
+                  Fail code msg -> (FAIL, [ "--", "Status", "(" <> show code <> ")", msg ])
+
+                leftSpacedTo s i = let n = length s in replicate (max 0 (i - n)) ' ' <> s
+            in  drawQueuedStatusBox note . encaseFileRow . tinting $ jobFileWidget jobFile suffix
+
+        drawFileComplete :: FileQuery () -> Widget n
+        drawFileComplete (FileQuery jobFile _) =
+            let tinting = withAttr progressDownloadAttr
+            in  drawQueuedStatusBox DONE . encaseFileRow . tinting $ jobFileWidget jobFile []
+
+        jobFileWidget :: JobFile -> [String] -> Widget n
+        jobFileWidget jobFile suffix =
+            let strWords = [ readableName jobFile ] <> suffix
+            in  str (unwords strWords) <+> fill ' '
+
+        drawQueuedStatusBox queuedStatus x =
+            let tiniting = queuedStatusTinting queuedStatus
+                prefix = padLeftRight 1 . str $ show queuedStatus
+            in  vLimit 1 $ hFoldWith vBorder [ tiniting prefix, x ]
+
+        fileListing :: [ Widget n ]
+        fileListing = fold
+            [ drawFileUpload   <$> upload
+            , drawFilePolling  <$> polling
+            , drawFileDownload <$> download
+            , drawFileComplete <$> complete
+            ]
+
+        fileCount = length fileListing
+
+        drawFileListing :: Widget n
+        drawFileListing = finalizeBox . vLimit (2 * fileCount - 1) $ vFoldWith hBorder fileListing
+
+        jobIsComplete = null upload && null polling && null download
+
+        continuedQueueing :: [ Widget n ]
+        continuedQueueing =
+            [ drawRefresh st
+            , drawFileListing
+            ]
+
+        completedQueueing :: [ Widget n ]
+        completedQueueing =
+            [ drawJobCompleteBox
+            , drawFileListing
+            ]
+
+    in  drawAppWidgetFromRegions $ [ drawSTREAM ] <>
+            if  jobIsComplete
+            then completedQueueing
+            else continuedQueueing
+
+
+drawAppWidgetFromRegions :: [ Widget n ] -> [ Widget n ]
+drawAppWidgetFromRegions = pure . padAll 1 . C.hCenter . vBox
+
+
+drawJobCompleteBox :: Widget n
+drawJobCompleteBox =
+    let shortNoteBox = padLeftRight 1 $ str "Stop"
+
+        notificationBox =
+            let msg = "Job Complete"
+                x = length msg
+                n = fromEnum (maxBound :: Tick)
+                (q,r) = (n - x) `quotRem` 2
+                lPad = q + r
+                rPad = q 
+            in  str $ fold
+                    [ replicate lPad ' '
+                    , msg
+                    , replicate rPad ' '
+                    ]
+
+        messageBox = encaseFileRow $ str "All Files Downloaded" <+> fill ' '
+
+    in  finalizeBox . vLimit 1 $ hFoldWith vBorder
+            [ shortNoteBox
+            , notificationBox
+            , messageBox
+            ]
+
+
+hFoldWith :: Foldable f => Widget n -> f (Widget n) -> Widget n
+hFoldWith sep = foldr1 (<+>) . intersperse sep . toList
+
+ 
+vFoldWith :: Foldable f => Widget n -> f (Widget n) -> Widget n
+vFoldWith sep = foldr1 (<=>) . intersperse sep . toList
+
+ 
+drawRefresh
+  :: ( HasCurrentTick a
+     , HasFileStore a a (FileProcessing x) (FileProcessing x)
+     )
+  => a -> Widget n
+drawRefresh st =
+    let drawRefreshLabel = padLeftRight 1 $ str "Poll"
+
+        drawRefreshGauge =
+            let tick = case st `queryBy` queryPolling  of
+                    [] -> toEnum 0 
+                    _ -> st ^. currentTick
+            in  tickToStr tick
+
+        tickToStr (Tick w) =
+            let x = fromEnum w
+                n = fromEnum (maxBound :: Tick)
+            in  str $ replicate x '█' <> replicate (n - x) ' '
+
+    in  finalizeBox . vLimit 1 $ drawRefreshLabel <+> vBorder <+> drawRefreshGauge
+
+
+finalizeBox :: Widget n -> Widget n
+finalizeBox = joinBorders . freezeBorders . border
+
+
+queryBy
+  :: ( Foldable t
+     , HasFileStore s s a a
+     )
+  => s
+  -> (FileStore a -> t b)
+  -> [b]
+queryBy st f = toList . f $ st ^. fileStore
+
+
+drawInputingTUI :: FrontEndStateInputing -> [Widget Name]
+drawInputingTUI st =
     let barTitle = hBox
-            [ drawSTREAM st
+            [ drawSTREAM
             , drawHelper st
             ]
         barInput = hBox
             [ drawUserInput st
             , drawFileBrowser st
             ]
-    in  pure . C.center $ vBox
+    in  drawAppWidgetFromRegions
             [ barTitle
             , barInput
             , drawChoosenFiles st
@@ -255,7 +690,7 @@ drawTUI st =
             ]
 
 
-drawSTREAM :: FrontEndTermState e -> Widget Name
+drawSTREAM :: Widget Name
 drawSTREAM =
     let boxTitle = drawTitle
             [ "Simple"
@@ -274,7 +709,7 @@ drawSTREAM =
 
         drawTitle = id
           . joinBorders
-          . withBorderStyle BS.unicodeBold
+          . withBorderStyle unicodeBold
           . B.borderWithLabel (str "STREAM User Endpoint")
           . freezeBorders
           . hLimit 47
@@ -283,23 +718,23 @@ drawSTREAM =
           . vBox
           . fmap drawLine
 
-    in  const boxTitle
+    in  boxTitle
 
 
-drawHelper :: FrontEndTermState e -> Widget Name
+drawHelper :: FrontEndStateInputing -> Widget Name
 drawHelper st =
     let
         boxLine (k,v) = keyBox k <+> valBox v
 
-        keyMax = maximum $ length . fst <$> pairs st
+        keyMax = maximum $ length . fst <$> pairings st
         keyPad x = x <> replicate (keyMax - length x) ' '
         keyBox x = padLeftRight 1 . hLimit keyMax . str $ keyPad x
 
-        valMax = maximum $ length . snd <$> pairs st
+        valMax = maximum $ length . snd <$> pairings st
         valPad x = x <> replicate (valMax - length x) ' '
         valBox x = padLeftRight 1 . hLimit valMax . str $ valPad x
 
-        pairs x = fold
+        pairings x = fold
             [ helpInfoConst x
             , helpInfoMetadata
             , helpInfoFileData x
@@ -357,7 +792,7 @@ drawHelper st =
 
     in  id
           . joinBorders
-          . withBorderStyle BS.unicodeBold
+          . withBorderStyle unicodeBold
           . B.borderWithLabel (str "Input Controls")
           . freezeBorders
           . hLimit 47
@@ -366,7 +801,7 @@ drawHelper st =
           $ boxHelp st
 
 
-drawUserInput :: FrontEndTermState e -> Widget Name
+drawUserInput :: FrontEndStateInputing -> Widget Name
 drawUserInput st =
     let formBox = id
             . joinBorders
@@ -380,7 +815,7 @@ drawUserInput st =
     in  formBox st
 
 
-drawFileBrowser :: FrontEndTermState e -> Widget Name
+drawFileBrowser :: FrontEndStateInputing -> Widget Name
 drawFileBrowser st =
     let
         browser = id
@@ -392,14 +827,14 @@ drawFileBrowser st =
     in browser st
 
 
-drawSendButton :: FrontEndTermState e -> Widget Name
+drawSendButton :: FrontEndStateInputing -> Widget Name
 drawSendButton st =
     let focusing = case st ^. inputFocused of
-            PaneSendTask -> withAttr readySend
+            PaneSendTask -> withAttr readySubmit
             _ -> id
 
         bordering = case st ^. inputFocused of
-            PaneSendTask -> withBorderStyle BS.unicodeBold
+            PaneSendTask -> withBorderStyle unicodeBold
             _ -> id
 
     in  id
@@ -415,21 +850,24 @@ drawSendButton st =
         . focusing
         $ str " S U B M I T "
 
-drawChoosenFiles :: FrontEndTermState e -> Widget Name
+
+drawDiskBox :: Disk -> Widget n
+drawDiskBox disk =
+    let maxDiskStrLen = 12
+    in  hLimit maxDiskStrLen $ fill ' ' <+> str (show disk)
+
+
+drawChoosenFiles :: FrontEndStateInputing -> Widget Name
 drawChoosenFiles st =
-    let fileLine (path, disk) =
-            let strDisk = show disk
-                padDisk = padLeft (Pad (8 - length strDisk)) $ str strDisk
-                boxDisk = padLeftRight  1  padDisk
-                boxPath = padRight (Pad 1) $ str path
-            in  vLimit 1 $ boxDisk <+> boxPath
+    let fileLine (jobFile, disk) =
+            let boxDisk = padLeftRight 1 $ drawDiskBox disk
+                boxPath = padRight (Pad 1) . str $ readableName jobFile
+            in  vLimit 1 $ boxDisk <+> boxPath <+> fill ' '
 
         sizing [] = [ hCenter $ str "( None )" ]
         sizing xs = xs
 
         fileList = id
---            . hCenter
-            . vLimit 16
             . hLimit 99
             . borderWithLabel (txt "Choosen Files")
             . freezeBorders
@@ -437,52 +875,6 @@ drawChoosenFiles st =
             . vBox
             . sizing
             . fmap fileLine
-            . toList
-            . (^. choosenFiles)
+            . fileStoreList
+            . (^. fileStore)
     in fileList st
-
-
-consumeSelectedFiles :: [FileInfo] -> Set (FilePath, Disk)
-consumeSelectedFiles fs =
-    let consumeFile fInfo = case fileStatusSize <$> fileInfoFileStatus fInfo of
-          Left _ -> []
-          Right size -> [(fileInfoFilePath fInfo, fromBytes size)]
-    in  fromList $ foldMap consumeFile fs
-
-
-getMarkedFiles :: EventM Name (FileBrowser Name) (Set (FilePath, Disk))
-getMarkedFiles = consumeSelectedFiles . FB.fileBrowserSelection <$> get
-
-
-sendJobRequest :: Manager -> Gateway -> JobInput -> Set (FilePath, Disk) -> IO ()
-sendJobRequest manager gateway input files =
-    let requestObject = toJSON $ buildJobSpecification files input
-        request connection = connection
-            { method = "POST"
-            , requestBody = RequestBodyLBS $ encode requestObject
-            }
-        handler :: Response BodyReader -> IO ()
-        handler response =
-            putStrLn $ "The status code was: " <> (show $ statusCode $ responseStatus response)
-
-    in  do  initialRequest <- parseRequest $ show gateway
-            traceToFile "Gateway" $ show gateway
-            traceToFile "JSON object to send" . BS.unpack . encodePretty $ toJSON $ buildJobSpecification files input
---            print . BS.unpack . encodePretty . toJSON $ buildJobSpecification files input
---            print (request initialRequest)
-            withResponse (request initialRequest) manager handler
-
-
-logFileHandle :: IORef Handle
-logFileHandle = unsafePerformIO $ openFile "brick.log" WriteMode >>= newIORef
-
-
-traceToFile :: (MonadIO m) => String -> String -> m ()
-traceToFile key val =
-    let writeOut :: Handle -> IO ()
-        writeOut h = hPutStrLn h (key <> ":\t" <> val) *> hFlush h
-
-        logKeyValPair :: IO ()
-        logKeyValPair = readIORef logFileHandle >>= writeOut
-
-    in  liftIO logKeyValPair

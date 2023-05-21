@@ -7,7 +7,7 @@ Build-Type:    Simple
 Author:        Alex Washburn <github@recursion.ninja>
 Copyright:     (c) 2015-2022 Alex Washburn
 License:       CC-BY-SA-4.0
-License-File:  doc/LICENSE
+License-File:  LICENSE
 
 Maintainer:    Alex Washburn <github@recursion.ninja>
 Homepage:      https://github.com/recursion-ninja/CSc-85011-Distributed-Computing-Project
@@ -16,22 +16,12 @@ Bug-Reports:   https://github.com/recursion-ninja/CSc-85011-Distributed-Computin
 Synopsis:      The TUI for the CUNY CSc 85011 Distributed and Cloud Computing Project
 Description:   The builds the frontend TUI along with other components
  
+Category: CLI TUI Web
+Tested-With: GHC == 9.6.1
+
 Source-Repository head
   type: git
   location: https://github.com/recursion-ninja/CSc-85011-Distributed-Computing-Project
-
-Category:
-    CLI
-    TUI
-    Web
-
-Tested-With:
-    GHC == 9.6.1
-
-Extra-Doc-Files:
-    ../doc/CHANGELOG.md
-    ../doc/README.md
-
 
 -- A litany of GHC warnings designed to alert us during the build of any common
 -- pitfalls, future compatibility issues, or coding conventions.
@@ -68,6 +58,7 @@ common build-config
     -Wno-implicit-prelude
     -Wno-missing-import-lists
     -Wno-missing-kind-signatures
+    -Wno-missing-local-signatures
     -Wno-missing-safe-haskell-mode
     -Wno-monomorphism-restriction
     -Wno-type-defaults
@@ -83,22 +74,24 @@ Executable science-broker-terminal
 
   build-depends:
     science-broker:terminal-layout,
+    science-broker:broker-disk,
+    science-broker:broker-gateway,
+    science-broker:broker-polling,
+    science-broker:client-cli-options,
+    science-broker:client-file-store,
     aeson,
-    aeson-pretty,
     base >=4.7 && <5,
     brick,
     bytestring,
     containers,
     directory,
-    Glob,
+    filepath,
     http-client,
     http-types,
     microlens,
-    microlens-th,
---    optparse-applicative,
-    text,
-    unix,
-    vector,
+    mtl,
+    req,
+    stm,               
     vty
                      
   ghc-options:
@@ -114,6 +107,10 @@ Executable science-broker-terminal
   main-is:
     FrontEnd.hs
 
+  other-modules:
+    FrontEnd.Core
+    FrontEnd.Types
+
   other-extensions:
     TemplateHaskell
 
@@ -124,18 +121,21 @@ Library terminal-layout
     build-config
 
   build-depends:
+    science-broker:broker-disk,
     aeson,
     base >=4.7 && <5,
+    containers,
     microlens,
     microlens-th,
-    network-uri,
-    optparse-applicative,
     text,
     
   exposed-modules:
-    Broker.CommandLineOptions
+    Broker.Job.Allocation
     Broker.Job.Input
     Broker.Job.Specification
+
+  other-modules:
+    Broker.Job.Specification.Internal
 
   hs-source-dirs:
     lib
@@ -145,3 +145,113 @@ Library terminal-layout
 
   visibility:
     private
+
+
+Library broker-disk
+
+  import:
+    build-config
+
+  build-depends:
+    aeson,
+    base >=4.7 && <5
+    
+  exposed-modules:
+    Broker.Disk
+
+  hs-source-dirs:
+    lib/broker-disk
+
+  visibility:
+    private
+
+
+Library broker-gateway
+
+  import:
+    build-config
+
+  build-depends:
+    base >=4.7 && <5,
+    modern-uri,
+    req,
+    text,
+    
+  exposed-modules:
+    Broker.Gateway
+
+  hs-source-dirs:
+    lib/broker-gateway
+
+  visibility:
+    private
+
+
+Library broker-polling
+
+  import:
+    build-config
+
+  build-depends:
+    aeson,
+    base >=4.7 && <5,
+    text,
+    
+  exposed-modules:
+    Broker.Job.Poll
+
+  hs-source-dirs:
+    lib
+
+  other-extensions:
+    TemplateHaskell
+
+  visibility:
+    private
+
+
+Library client-cli-options
+
+  import:
+    build-config
+
+  build-depends:
+    science-broker:broker-gateway,
+    base >=4.7 && <5,
+    optparse-applicative,
+    
+  exposed-modules:
+    Client.CommandLineOptions
+
+  hs-source-dirs:
+    lib/client-cli-options
+
+  visibility:
+    private
+
+
+Library client-file-store
+
+  import:
+    build-config
+
+  build-depends:
+    science-broker:broker-disk,
+    base >=4.7 && <5,
+    containers,
+    filepath,
+    req,
+    text,
+    
+  exposed-modules:
+    Client.FileStore
+
+  hs-source-dirs:
+    lib/client-file-store
+
+  other-extensions:
+    TemplateHaskell
+
+  visibility:
+    private
+
