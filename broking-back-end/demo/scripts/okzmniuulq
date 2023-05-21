@@ -1,0 +1,26 @@
+
+
+https://kimizhang.wordpress.com
+TODO: https://youtu.be/B17qcaSglHA
+TODO: https://mtbales.com/2021/04/23/getting-multi-node-microstack-instance-migration-to-work/
+------------
+https://docs.openstack.org/nova/pike/admin/live-migration-usage.html
+
+https://cloud.garr.it/support/kb/openstack/manual_VM_host_migration/
+
+https://docs.fuga.cloud/migrate-an-instance-from-one-openstack-to-another
+
+https://bugs.launchpad.net/nova/+bug/1549828
+
+https://docs.openstack.org/nova/ussuri/admin/ssh-configuration.html
+
+https://docs.openstack.org/devstack/latest/guides/multinode-lab.html#live-migration
+
+https://bugs.launchpad.net/nova/+bug/1549828
+
+https://bugs.launchpad.net/nova/+bug/1671288
+
+https://bugs.launchpad.net/nova/+bug/1252519
+
+https://docs.openstack.org/nova/pike/admin/configuring-migrations.html
+
