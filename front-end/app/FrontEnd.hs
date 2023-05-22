@@ -389,10 +389,10 @@ theMap = attrMap V.defAttr
     , ( progressIncompleteAttr,          fg  uploadedBackground )
     , ( progressCompleteAttr  , V.black `on` uploadedBackground )
     , ( statusSEND            , V.black `on` uploadedBackground )
-    , ( statusWAIT            , V.black `on` linearColor 150 225 210 )
-    , ( statusWORK            , V.black `on` linearColor 160 230 215 )
-    , ( statusDOWN            , V.black `on` linearColor 170 235 220 )
-    , ( statusDONE            , V.black `on` linearColor 180 240 225 )
+    , ( statusWAIT            , V.black `on` linearColor 150 210 225 )
+    , ( statusWORK            , V.black `on` linearColor 150 215 220 )
+    , ( statusDOWN            , V.black `on` linearColor 150 220 215 )
+    , ( statusDONE            , V.black `on` linearColor 150 225 210 )
     , ( statusFAIL            , V.black `on` V.red )
     ]
 
