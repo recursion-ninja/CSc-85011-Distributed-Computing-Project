@@ -432,7 +432,7 @@ jobSpecificationForm =
         label s f w = padBottom (Pad 1) $ (vLimit 1 $ hLimit 7 $ str (s <> ":") <+> fill ' ') <+> f w
 
         emailBox :: Widget n -> Widget n
-        emailBox = withBorderStyle unicodeBold . hLimit 36
+        emailBox = withBorderStyle unicodeBold . hLimit 26
 
         edictBox :: Widget n -> Widget n
         edictBox = withBorderStyle unicodeBold . (<+> str "minutes") . padRight (Pad 1) . hLimit 8
