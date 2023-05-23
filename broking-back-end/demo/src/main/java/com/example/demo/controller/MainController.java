@@ -39,5 +39,16 @@ public class MainController {
         return ResponseEntity.ok(filesAndDomains);
     }
 
+    @GetMapping("/jobs")
+    public ResponseEntity<List<JobDTO>> getAllJobs(){
+        List<JobDTO> jobs = mainService.getAllJobs();
+        return ResponseEntity.ok(jobs);
+    }
+
+    @GetMapping("/jobs/priority")
+    public ResponseEntity<String> getPriority(@RequestParam("fileName") String fileName){
+        Priority priority = mainService.getPriority(fileName);
+        return ResponseEntity.ok(priority.toString());
+    }
 
 }
