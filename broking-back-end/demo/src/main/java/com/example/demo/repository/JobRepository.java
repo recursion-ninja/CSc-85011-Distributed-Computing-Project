@@ -9,4 +9,6 @@ public interface JobRepository extends JpaRepository<Job, Long> {
 
     Job getById(Long  id);
 
+    Job getByFileName(String fileName);
+
 }

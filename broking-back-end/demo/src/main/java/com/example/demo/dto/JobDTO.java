@@ -1,5 +1,6 @@
 package com.example.demo.dto;
 
+import com.example.demo.domain.Job;
 import com.example.demo.domain.Priority;
 
 public class JobDTO {
@@ -13,6 +14,18 @@ public class JobDTO {
     private String fileName;
 
     private Priority priority;
+
+
+    public JobDTO() {
+    }
+
+    public JobDTO(Job job) {
+        this.numOfMinutes = job.getNumOfMinutes();
+        this.userEmail = job.getUserEmail();
+        this.diskSpace = job.getDiskSpace();
+        this.fileName = job.getFileName();
+        this.priority = job.getPriority();
+    }
 
     public Integer getDiskSpace() {
         return diskSpace;
