@@ -1,5 +1,5 @@
 package com.example.demo.repository;
-
+//libraries
 import com.example.demo.domain.Job;
 import com.example.demo.domain.Status;
 import org.springframework.data.jpa.repository.JpaRepository;
