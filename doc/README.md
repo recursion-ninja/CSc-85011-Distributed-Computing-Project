@@ -27,7 +27,7 @@ java -jar ./broker-backend.jar
 
 For the domains:
 ```
-java -jar ./domains-backend.jar
+java -jar ./domain-backend.jar
 ```
 
 Both executables are available in the `./bin` folder. They can also be generated from the source code with maven:
@@ -41,7 +41,7 @@ mvn clean install
 ```
 The generated executables will be in `/broking-back-end/demo/target` and `domain-back-end/demo/target` folders.
 
-The domain executable should be executed on three different servers. Once all three domains are up and running, sent the IP addresses of the domains to the broker:
+The domain executable should be executed on three different servers. Once all three domains are up and running, send their IP address to the broker:
 
 ```
 curl --location --request POST 'http://<broker-ip>:8080/api/domains' --header 'Content-Type: application/json' \
