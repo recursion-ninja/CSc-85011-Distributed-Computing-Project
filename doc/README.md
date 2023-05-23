@@ -60,6 +60,17 @@ Three folders should be created where the domain executable is running:
 mkdir uploads audios queue
 ```
 
+## Automated jobs
+In the domain server, create a cronjob:
+```
+crontab -e
+```
+
+And then add the following line to the config file to run `./script.sh` periodically:
+```
+* * * * * bash /<path-to-the-script>/script.sh
+```
+
 ## Example usage of front-end TUI
 
 [![asciicast](https://asciinema.org/a/Sd9Yiks5qpvJQM2zw4KA5RREN.svg)](https://asciinema.org/a/Sd9Yiks5qpvJQM2zw4KA5RREN?speed=2&theme=solarized-dark&autoplay=1)
