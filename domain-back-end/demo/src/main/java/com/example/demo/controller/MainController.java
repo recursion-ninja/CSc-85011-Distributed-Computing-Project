@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -44,7 +45,7 @@ public class MainController {
     }
 
     @PutMapping("/status")
-    public ResponseEntity<Void> changeStatus(@RequestBody Map<String, String> body){
+    public ResponseEntity<Void> changeStatus(@RequestBody Map<String, String> body) throws IOException {
         String fileName = body.get("fileName");
         Status status = Status.valueOf(body.get("status"));
 
@@ -59,12 +60,18 @@ public class MainController {
         return ResponseEntity.ok(load);
     }
 
-    @PostMapping("/migrate")
+    @PostMapping("/migrate") //not used
     public ResponseEntity migrateJob(@RequestBody Map<String, String> body) {
         String destinationDomainIP = body.get("destination");
         String fileName = body.get("fileName");
 
         jobService.migrateWaitingLowPriorityJobs(destinationDomainIP, fileName);
         return ResponseEntity.ok().build();
+    }
+
+    @GetMapping("/jobs")
+    public ResponseEntity<List<JobDTO>> getAllJobs(){
+        List<JobDTO> jobs = jobService.getAllJobs();
+        return ResponseEntity.ok(jobs);
     }
 }

@@ -25,6 +25,17 @@ public class Job {
     @Enumerated(EnumType.STRING)
     private Status status;
 
+    @Column(name = "priority")
+    @Enumerated(EnumType.STRING)
+    private Priority priority;
+
+
+    // If pivot is True for a HIGH priority job, the LOW priority jobs that have been created before have been put in Queue.
+    // When the job that has True pivot completes, it's time to process the jobs in Queue.
+    @Column(name = "pivot")
+    private Boolean pivot;
+
+
     public Long getId() {
         return id;
     }
@@ -71,5 +82,21 @@ public class Job {
 
     public void setStatus(Status status) {
         this.status = status;
+    }
+
+    public Priority getPriority() {
+        return priority;
+    }
+
+    public void setPriority(Priority priority) {
+        this.priority = priority;
+    }
+
+    public Boolean getPivot() {
+        return pivot;
+    }
+
+    public void setPivot(Boolean pivot) {
+        this.pivot = pivot;
     }
 }

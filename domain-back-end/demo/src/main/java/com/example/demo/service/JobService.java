@@ -1,6 +1,7 @@
 package com.example.demo.service;
 
 import com.example.demo.domain.Job;
+import com.example.demo.domain.Priority;
 import com.example.demo.domain.Status;
 import com.example.demo.dto.JobDTO;
 import com.example.demo.repository.JobRepository;
@@ -10,13 +11,18 @@ import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
+import java.net.URL;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.apache.commons.io.FilenameUtils;
@@ -26,7 +32,10 @@ public class JobService {
 
     private final JobRepository jobRepository;
     private final Path folderForUploadedFiles = Paths.get("uploads");
+    private final Path folderForFilesInQueue = Paths.get("queue");
     private final Path folderForFinishedFiles = Paths.get("audios");
+    private final String brokingIP = "192.86.139.79";
+    private final Integer threshold = 30; //MB
 
     public JobService(JobRepository jobRepository) {
         this.jobRepository = jobRepository;
@@ -55,9 +64,63 @@ public class JobService {
         newJob.setFileName(file.getOriginalFilename());
         newJob.setSize(file.getSize());
         newJob.setStatus(Status.WAITING);
-        //        newJob.setUserEmail();
-//        newJob.setNumOfMinutes();
+        newJob.setPivot(false);
+
+        Priority priority = null;
+        try {
+            URL url = new URL("http://"+brokingIP+":8080/api/jobs/priority?fileName="+file.getOriginalFilename());
+            HttpURLConnection con = (HttpURLConnection) url.openConnection();
+            con.setRequestMethod("GET");
+            BufferedReader in = new BufferedReader(new InputStreamReader(con.getInputStream()));
+            priority = Priority.valueOf(in.readLine());
+
+            System.out.println("**********************");
+            System.out.println(priority.equals(Priority.HIGH));
+            System.out.println(getLoad());
+            System.out.println(threshold*1000*1000);
+
+
+            if (priority.equals(Priority.HIGH) && getLoad() >= threshold*1000*1000){
+                System.out.println("here");
+                newJob.setPivot(true);
+                moveLowPriorityWaitingJobsToQueue();
+            }
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        newJob.setPriority(priority);
         return jobRepository.save(newJob).getId();
+
+    }
+
+    private void moveLowPriorityWaitingJobsToQueue() throws IOException {
+        List<Job> jobs = jobRepository.getAllByStatusAndPriority(Status.WAITING, Priority.LOW);
+
+        for (Job job: jobs) {
+            String fileName = job.getFileName();
+            Path source = folderForUploadedFiles.resolve(fileName);
+            Path target = folderForFilesInQueue.resolve(fileName);
+            Files.move(source, target);
+        }
+
+    }
+
+    private void moveLowPriorityWaitingJobsFromQueue() throws IOException {
+
+        File folder = new File(folderForFilesInQueue.toString());
+        File[] listOfFiles = folder.listFiles();
+
+        for (File file : listOfFiles) {
+            if (file.isFile()) {
+
+                String fileName = file.getName();
+                Path target = folderForUploadedFiles.resolve(fileName);
+
+                Files.move(file.toPath(), target);
+            }
+        }
 
     }
 
@@ -81,9 +144,14 @@ public class JobService {
         }
     }
 
-    public void changeStatus(String fileName, Status status) {
+    public void changeStatus(String fileName, Status status) throws IOException {
         Job job = jobRepository.getByFileName(fileName);
         job.setStatus(status);
+
+        if (job.getPivot() && status.equals(Status.FINISHED)){
+            moveLowPriorityWaitingJobsFromQueue();
+        }
+
         jobRepository.save(job);
     }
 
@@ -119,4 +187,13 @@ public class JobService {
         jobRepository.deleteByFileName(fileName);
 
     }
+
+    public List<JobDTO> getAllJobs(){
+        List<JobDTO> jobs = new ArrayList<>();
+        for (Job job: jobRepository.findAll()) {
+            jobs.add(new JobDTO(job));
+        }
+        return jobs;
+    }
+
 }

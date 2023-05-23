@@ -13,12 +13,12 @@ public class Job {
     private Integer diskSpace;
 
     @Column(name = "num_of_minutes")
-    private Integer numOfMinutes;
+    private Integer numOfMinutes; // not used
 
     @Column(name = "user_email")
     private String userEmail;
 
-    @Column(name = "script_name")
+    @Column(name = "file_name")
     private String fileName;
 
     @Column(name = "priority")

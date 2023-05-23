@@ -1,23 +1,40 @@
 package com.example.demo.dto;
 
 import com.example.demo.domain.Job;
+import com.example.demo.domain.Priority;
+import com.example.demo.domain.Status;
 
 public class JobDTO {
     private Long id;
 
-    private Integer numOfCPUCores;
-
-    private Integer numOfGPUCores;
-
-    private Integer memorySize;
-
-    private Integer diskSpace;
+    private Long size;
 
     private Integer numOfMinutes;
 
     private String userEmail;
 
     private String fileName;
+
+    private Priority priority;
+
+    private Boolean pivot;
+
+    private Status status;
+
+    public JobDTO() {
+    }
+
+    public JobDTO(Job job) {
+        this.id = job.getId();
+        this.fileName = job.getFileName();
+        this.numOfMinutes = job.getNumOfMinutes();
+        this.pivot = job.getPivot();
+        this.priority = job.getPriority();
+        this.size = job.getSize();
+        this.status = job.getStatus();
+        this.userEmail = job.getUserEmail();
+    }
+
 
 
     public Long getId() {
@@ -26,38 +43,6 @@ public class JobDTO {
 
     public void setId(Long id) {
         this.id = id;
-    }
-
-    public Integer getNumOfCPUCores() {
-        return numOfCPUCores;
-    }
-
-    public void setNumOfCPUCores(Integer numOfCPUCores) {
-        this.numOfCPUCores = numOfCPUCores;
-    }
-
-    public Integer getNumOfGPUCores() {
-        return numOfGPUCores;
-    }
-
-    public void setNumOfGPUCores(Integer numOfGPUCores) {
-        this.numOfGPUCores = numOfGPUCores;
-    }
-
-    public Integer getMemorySize() {
-        return memorySize;
-    }
-
-    public void setMemorySize(Integer memorySize) {
-        this.memorySize = memorySize;
-    }
-
-    public Integer getDiskSpace() {
-        return diskSpace;
-    }
-
-    public void setDiskSpace(Integer diskSpace) {
-        this.diskSpace = diskSpace;
     }
 
     public Integer getNumOfMinutes() {
@@ -82,5 +67,21 @@ public class JobDTO {
 
     public void setFileName(String scriptName) {
         this.fileName = fileName;
+    }
+
+    public Priority getPriority() {
+        return priority;
+    }
+
+    public void setPriority(Priority priority) {
+        this.priority = priority;
+    }
+
+    public Boolean getPivot() {
+        return pivot;
+    }
+
+    public void setPivot(Boolean pivot) {
+        this.pivot = pivot;
     }
 }

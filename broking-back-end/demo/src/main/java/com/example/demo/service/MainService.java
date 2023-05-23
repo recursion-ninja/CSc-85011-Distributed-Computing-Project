@@ -49,15 +49,18 @@ public class MainService {
 
         Map<String, String> response = new HashMap<>();
         for (JobDTO jobDTO: jobDTOs) {
+
+            Domain domain = selectOptimalDomain(jobDTO.getPriority(), jobDTO.getDiskSpace());
+
             Job newJob = new Job();
             newJob.setDiskSpace(jobDTO.getDiskSpace());
             newJob.setNumOfMinutes(jobDTO.getNumOfMinutes());
             newJob.setUserEmail(jobDTO.getUserEmail());
             newJob.setFileName(jobDTO.getFileName());
-
+            newJob.setPriority(jobDTO.getPriority());
+            newJob.setDomain(domain);
             jobRepository.save(newJob);
 
-            Domain domain = selectOptimalDomain(jobDTO.getPriority(), jobDTO.getDiskSpace());
             domain.setAvailableDiskSpace( domain.getAvailableDiskSpace() - jobDTO.getDiskSpace() );
             domainRepository.save(domain);
 
@@ -72,21 +75,20 @@ public class MainService {
 
         Map<Domain, Integer> map = new HashMap<>();
 
+        // get loads from domains
         for (Domain domain: domains){
             try {
-
                 URL url = new URL("http://"+domain.getIp()+":8080/api/load");
                 HttpURLConnection con = (HttpURLConnection) url.openConnection();
                 con.setRequestMethod("GET");
                 BufferedReader in = new BufferedReader(new InputStreamReader(con.getInputStream()));
                 int load = Integer.parseInt(in.readLine());
-                //int load = new Random().nextInt(1000);
-
                 map.put(domain, load);
             } catch (IOException e) {
                e.printStackTrace();
            }
 }
+        // sort domains by load in ascending order
         List<Map.Entry<Domain,Integer>> sorted = map.entrySet().stream()
                         .sorted(Map.Entry.comparingByValue())
                         .collect(Collectors.toList());
@@ -96,31 +98,36 @@ public class MainService {
             System.out.println(e.getKey().getIp()+" - "+e.getValue());
         }
 
+        // assign the domain that has lowest load to HIGH priority job,
+        // domain that has highest load to LOW priority job
         switch (priority){
             case LOW:
                 if (fileSize<=sorted.get(2).getKey().getAvailableDiskSpace())
                     return sorted.get(2).getKey();
-//                else if (fileSize<=sorted.get(1).getKey().getAvailableDiskSpace())
-//                    return sorted.get(1).getKey();
-//                else if (fileSize<=sorted.get(0).getKey().getAvailableDiskSpace())
-//                    return sorted.get(0).getKey();
+
             case MEDIUM:
                 if (fileSize<=sorted.get(1).getKey().getAvailableDiskSpace())
                     return sorted.get(1).getKey();
-//                else if (fileSize<=sorted.get(0).getKey().getAvailableDiskSpace())
-//                    return sorted.get(0).getKey();
-//                else if (fileSize<=sorted.get(2).getKey().getAvailableDiskSpace())
-//                    return sorted.get(2).getKey();
+
             case HIGH:
                 if (fileSize<=sorted.get(0).getKey().getAvailableDiskSpace())
                     return sorted.get(0).getKey();
-//                else if (fileSize<=sorted.get(1).getKey().getAvailableDiskSpace())
-//                    return sorted.get(1).getKey();
-//                else if (fileSize<=sorted.get(2).getKey().getAvailableDiskSpace())
-//                return sorted.get(2).getKey();
         }
 
         return null;
+   }
+
+   public List<JobDTO> getAllJobs(){
+        List<JobDTO> jobs = new ArrayList<>();
+        for (Job job: jobRepository.findAll()){
+            jobs.add(new JobDTO(job));
+       }
+        return jobs;
+   }
+
+   public Priority getPriority(String fileName){
+
+        return jobRepository.getByFileName(fileName).getPriority();
    }
 
 }
