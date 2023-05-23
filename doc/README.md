@@ -50,6 +50,16 @@ curl --location --request POST 'http://<broker-ip>:8080/api/domains' --header 'C
     "availableDiskSpace": 12000
 ```
 
+## Database
+The in-memory database is accessible at `http://<broker or domain IP>:8080/h2/`. The credentials can be found in `broking-back-end/demo/src/main/resources/application.properties` and `domain-back-end/demo/src/main/resources/application.properties`.
+
+## Folders
+
+Three folders should be created where the domain executable is running:
+```
+mkdir uploads audios queue
+```
+
 ## Example usage of front-end TUI
 
 [![asciicast](https://asciinema.org/a/Sd9Yiks5qpvJQM2zw4KA5RREN.svg)](https://asciinema.org/a/Sd9Yiks5qpvJQM2zw4KA5RREN?speed=2&theme=solarized-dark&autoplay=1)
