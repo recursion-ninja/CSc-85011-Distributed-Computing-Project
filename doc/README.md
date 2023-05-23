@@ -16,6 +16,39 @@ make install
 
 Subsequently, the front-end TUI binary will be available at `./bin/science-broker-terminal` located from the project root.
 
+### Back-end 
+
+To run the the backend, execute the following commands: 
+
+For the broker:
+```
+java -jar ./broker-backend.jar
+```
+
+For the domains:
+```
+java -jar ./domains-backend.jar
+```
+
+Both executables are available in the `./bin` folder. They can also be generated from the source code with maven:
+```
+cd broking-back-end/demo/
+mvn clean install
+```
+```
+cd domain-back-end/demo/
+mvn clean install
+```
+The generated executables will be in `/broking-back-end/demo/target` and `domain-back-end/demo/target` folders.
+
+The domain executable should be executed on three different servers. Once all three domains are up and running, sent the IP addresses of the domains to the broker:
+
+```
+curl --location --request POST 'http://<broker-ip>:8080/api/domains' --header 'Content-Type: application/json' \
+--data-raw '{
+    "ip": "<domain-ip>",
+    "availableDiskSpace": 12000
+```
 
 ## Example usage of front-end TUI
 
