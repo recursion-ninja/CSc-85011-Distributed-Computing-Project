@@ -12,7 +12,6 @@ jobs: $ncpus
 minimize-conflict-set: True
 overwrite-policy: always
 packages: .
-with-compiler: ghc-9.4.5
 
 
 ---------------------------------------------------------------------------------

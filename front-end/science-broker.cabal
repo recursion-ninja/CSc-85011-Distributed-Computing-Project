@@ -92,7 +92,8 @@ Executable science-broker-terminal
     mtl,
     req,
     stm,               
-    vty
+    vty,
+    vty-crossplatform,
                      
   ghc-options:
     -rtsopts
